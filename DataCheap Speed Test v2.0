@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================================
-# DataCheap Speed Test v2.0
+# DataPeer Speed Test v2.1
 # Mescheryakov & Romanov Industries
 # =============================================================================
 
@@ -38,8 +38,8 @@ fi
 # CONFIGURATION
 # =============================================================================
 
-VERSION="2.0.0"
-CONFIG_DIR="$HOME/.config/datacheap-speedtest"
+VERSION="2.1"
+CONFIG_DIR="$HOME/.config/datapeer-speedtest"
 HISTORY_FILE="$CONFIG_DIR/history.csv"
 PING_SAMPLES=10
 DOWNLOAD_SECONDS=10
@@ -64,7 +64,7 @@ while [[ $# -gt 0 ]]; do
         -q|--quiet) QUIET_MODE=true; shift ;;
         -h|--history) SHOW_HISTORY=true; shift ;;
         --help) 
-            echo "DataCheap Speed Test v$VERSION"
+            echo "DataPeer Speed Test v$VERSION"
             echo "Usage: $0 [OPTIONS]"
             echo "  -j, --json     JSON output"
             echo "  -q, --quiet    Quiet mode"
@@ -114,15 +114,12 @@ print_header() {
     echo '    ║     ██║  ██║██╔══██║   ██║   ██╔══██║           ║'
     echo '    ║     ██████╔╝██║  ██║   ██║   ██║  ██║           ║'
     echo '    ║     ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝           ║'
-    echo '    ║     ███████╗██████╗ ███████╗███████╗██████╗     ║'
-    echo '    ║     ██╔════╝██╔══██╗██╔════╝██╔════╝██╔══██╗    ║'
-    echo '    ║     █████╗  ██████╔╝█████╗  █████╗  ██████╔╝    ║'
-    echo '    ║     ██╔══╝  ██╔═══╝ ██╔══╝  ██╔══╝  ██╔══██╗    ║'
-    echo '    ║     ███████╗██║     ███████╗███████╗██║  ██║    ║'
-    echo '    ║     ╚══════╝╚═╝     ╚══════╝╚══════╝╚═╝  ╚═╝    ║'
     echo '    ║                                                  ║'
-    printf "    ║${RESET}${BOLD}${YELLOW}%40s${RESET}${CYAN}║\n" "v$VERSION"
-    printf "    ║${RESET}${DIM}%40s${RESET}${CYAN}║\n" "Mescheryakov & Romanov"
+    echo '    ║              D A T A P E E R                    ║'
+    echo '    ║              S P E E D   T E S T                 ║'
+    echo '    ║                                                  ║'
+    printf "    ║${RESET}${BOLD}${YELLOW}%38s${RESET}${CYAN}║\n" "v$VERSION"
+    printf "    ║${RESET}${DIM}%38s${RESET}${CYAN}║\n" "Mescheryakov & Romanov"
     echo '    ╚══════════════════════════════════════════════════╝'
     echo "${RESET}"
 }
@@ -132,7 +129,8 @@ spinner() {
     local pid=$1 msg="$2" spin='⣾⣽⣻⢿⡿⣟⣯⣷' i=0
     while kill -0 "$pid" 2>/dev/null; do
         printf "\r  ${CYAN}${spin:$((i % 8)):1}${RESET} ${msg}... "
-        i=$((i + 1)); sleep 0.1
+        i=$((i + 1))
+        sleep 0.1
     done
     wait "$pid" 2>/dev/null
     printf "\r  ${GREEN}✓${RESET} ${msg}... ${GREEN}Done${RESET}  \n"
@@ -143,28 +141,46 @@ spinner() {
 # =============================================================================
 
 fetch_probes() {
-    TMPDIR_ST=$(mktemp -d "/tmp/datacheap.XXXXXX" 2>/dev/null || echo "/tmp/datacheap.$$")
+    TMPDIR_ST=$(mktemp -d "/tmp/datapeer.XXXXXX" 2>/dev/null || echo "/tmp/datapeer.$$")
     mkdir -p "$TMPDIR_ST"
-    
+
     local raw
-    raw=$(curl -s --max-time 10 -H "User-Agent: $UA" -H "Accept: application/json" "$PROBES_API" 2>/dev/null)
-    [[ -z "$raw" ]] && { echo "${RED}Failed to fetch servers${RESET}" >&2; exit 1; }
+    raw=$(curl -s --max-time 15 -H "User-Agent: $UA" -H "Accept: application/json" "$PROBES_API" 2>/dev/null)
     
+    if [[ -z "$raw" ]]; then
+        echo -e "\n${RED}Failed to fetch servers from Yandex. Check your internet connection.${RESET}" >&2
+        exit 1
+    fi
+
     echo "$raw" > "$TMPDIR_ST/probes.json"
-    
+
     python3 << PYEOF 2>/dev/null
-import json, os
+import json, os, sys
 td = os.environ['TMPDIR_ST']
-with open(f"{td}/probes.json") as f: d = json.load(f)
-with open(f"{td}/ping_urls", "w") as f:
-    for p in d.get("latency", {}).get("probes", []): f.write(p["url"] + "\n")
-with open(f"{td}/download_urls", "w") as f:
-    for p in d.get("download", {}).get("probes", []):
-        if "50mb" in p["url"]: f.write(p["url"] + "\n")
-with open(f"{td}/upload_urls", "w") as f:
-    for p in d.get("upload", {}).get("probes", []):
-        if "timeout" not in p["url"]: f.write(p["url"] + "\n")
+try:
+    with open(f"{td}/probes.json") as f:
+        d = json.load(f)
+    with open(f"{td}/ping_urls", "w") as f:
+        for p in d.get("latency", {}).get("probes", []):
+            if p.get("url"): f.write(p["url"] + "\n")
+    with open(f"{td}/download_urls", "w") as f:
+        for p in d.get("download", {}).get("probes", []):
+            if "50mb" in p.get("url", ""):
+                f.write(p["url"] + "\n")
+    with open(f"{td}/upload_urls", "w") as f:
+        for p in d.get("upload", {}).get("probes", []):
+            if "timeout" not in p.get("url", ""):
+                f.write(p["url"] + "\n")
+    sys.exit(0)
+except Exception as e:
+    sys.stderr.write(f"Python error: {e}\n")
+    sys.exit(1)
 PYEOF
+
+    if [[ $? -ne 0 ]]; then
+        echo -e "\n${RED}Failed to parse server data${RESET}" >&2
+        exit 1
+    fi
 }
 
 get_connection_info() {
@@ -172,12 +188,13 @@ get_connection_info() {
     ipv4=$(curl -s --max-time 5 "$IPV4_API" 2>/dev/null | tr -d '"' || echo "N/A")
     ipv6=$(curl -s --max-time 3 -6 "$IPV6_API" 2>/dev/null | tr -d '"' || echo "")
     info=$(curl -s --max-time 5 "https://ipinfo.io/${ipv4}/json" 2>/dev/null || echo '{}')
-    
-    CONN_IPV4="$ipv4"; CONN_IPV6="$ipv6"
-    CONN_ORG=$(echo "$info" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('org',''))" 2>/dev/null || echo "N/A")
-    CONN_CITY=$(echo "$info" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('city',''))" 2>/dev/null || echo "N/A")
-    CONN_REGION=$(echo "$info" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('region',''))" 2>/dev/null || echo "N/A")
-    CONN_COUNTRY=$(echo "$info" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('country',''))" 2>/dev/null || echo "N/A")
+
+    CONN_IPV4="$ipv4"
+    CONN_IPV6="$ipv6"
+    CONN_ORG=$(echo "$info" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('org','N/A'))" 2>/dev/null || echo "N/A")
+    CONN_CITY=$(echo "$info" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('city','N/A'))" 2>/dev/null || echo "N/A")
+    CONN_REGION=$(echo "$info" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('region',''))" 2>/dev/null || echo "")
+    CONN_COUNTRY=$(echo "$info" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('country',''))" 2>/dev/null || echo "")
 }
 
 measure_ping() {
@@ -190,18 +207,23 @@ measure_ping() {
             local ts=$(echo "$timing" | awk '{print $1}')
             local ta=$(echo "$timing" | awk '{print $2}')
             local ms=$(echo "($ts - $ta) * 1000" | bc 2>/dev/null || echo "0")
-            (( $(echo "$ms > 0" | bc -l) )) && results+=("$ms")
+            if (( $(echo "$ms > 0" | bc -l) )); then
+                results+=("$ms")
+            fi
         done
     done < "$TMPDIR_ST/ping_urls"
-    
+
     local count=${#results[@]}
-    [[ $count -eq 0 ]] && { echo "0.00|0.00|0.00|0.00"; return; }
-    
+    if [[ $count -eq 0 ]]; then
+        echo "0.00|0.00|0.00|0.00"
+        return
+    fi
+
     IFS=$'\n' sorted=($(printf '%s\n' "${results[@]}" | sort -g))
     unset IFS
     local trim=$((count / 4))
     local total=0 min=999999 max=0 trimmed=0
-    
+
     for idx in $(seq $trim $((count - trim - 1))); do
         local val=${sorted[$idx]}
         total=$(echo "$total + $val" | bc)
@@ -209,7 +231,7 @@ measure_ping() {
         (( $(echo "$val < $min" | bc -l) )) && min=$val
         (( $(echo "$val > $max" | bc -l) )) && max=$val
     done
-    
+
     local avg=$(fmt "$total / $trimmed")
     local jitter=0 prev=""
     for idx in $(seq $trim $((count - trim - 1))); do
@@ -222,7 +244,7 @@ measure_ping() {
         prev=$val
     done
     jitter=$(fmt "$jitter / ($trimmed - 1)" 2>/dev/null || echo "0.00")
-    
+
     echo "$avg|$(fmt "$min / 1")|$(fmt "$max / 1")|$jitter"
 }
 
@@ -237,16 +259,18 @@ measure_download() {
         ) &
         pids+=($!)
     done < "$TMPDIR_ST/download_urls"
-    
+
     for pid in "${pids[@]}"; do wait "$pid" 2>/dev/null || true; done
-    
+
     local total=0
     for f in "$TMPDIR_ST"/dlspeed_*; do
         [[ -f "$f" ]] || continue
         local line=$(cat "$f" 2>/dev/null || echo "0 0")
         local size=$(echo "$line" | awk '{print $1}')
         local time=$(echo "$line" | awk '{print $2}')
-        (( $(echo "$time > 0" | bc -l) )) && total=$(echo "$total + $size * 8 / $time" | bc)
+        if (( $(echo "$time > 0" | bc -l) )); then
+            total=$(echo "$total + $size * 8 / $time" | bc)
+        fi
     done
     echo "$total"
 }
@@ -264,33 +288,70 @@ measure_upload() {
         ) &
         pids+=($!)
     done < "$TMPDIR_ST/upload_urls"
-    
+
     for pid in "${pids[@]}"; do wait "$pid" 2>/dev/null || true; done
-    
+
     local total=0
     for f in "$TMPDIR_ST"/ulspeed_*; do
         [[ -f "$f" ]] || continue
         local line=$(cat "$f" 2>/dev/null || echo "0 0")
         local size=$(echo "$line" | awk '{print $1}')
         local time=$(echo "$line" | awk '{print $2}')
-        (( $(echo "$time > 0" | bc -l) )) && total=$(echo "$total + $size * 8 / $time" | bc)
+        if (( $(echo "$time > 0" | bc -l) )); then
+            total=$(echo "$total + $size * 8 / $time" | bc)
+        fi
     done
     echo "$total"
 }
 
 save_history() {
     mkdir -p "$CONFIG_DIR"
-    [[ ! -f "$HISTORY_FILE" ]] && echo "timestamp,download,upload,ping" > "$HISTORY_FILE"
+    if [[ ! -f "$HISTORY_FILE" ]]; then
+        echo "timestamp,download_bps,upload_bps,ping_ms" > "$HISTORY_FILE"
+    fi
     echo "$(date +%Y-%m-%d\ %H:%M:%S),$1,$2,$3" >> "$HISTORY_FILE"
 }
 
 show_history() {
-    [[ ! -f "$HISTORY_FILE" ]] && { echo "${YELLOW}No history${RESET}"; return; }
+    if [[ ! -f "$HISTORY_FILE" ]]; then
+        echo -e "${YELLOW}No test history yet. Run some tests first!${RESET}"
+        return
+    fi
     echo ""
     echo -e "  ${BOLD}${CYAN}════════════════════════════════════════${RESET}"
     echo -e "  ${BOLD}TEST HISTORY${RESET}"
     echo -e "  ${DIM}────────────────────────────────────${RESET}"
-    tail -n 5 "$HISTORY_FILE" | column -t -s ',' | while read line; do echo "  $line"; done
+    tail -n 10 "$HISTORY_FILE" | column -t -s ',' | while read line; do
+        echo "  $line"
+    done
+    echo -e "  ${CYAN}════════════════════════════════════════${RESET}"
+    echo ""
+}
+
+print_connection_info() {
+    if $JSON_OUTPUT || $QUIET_MODE; then
+        return
+    fi
+    echo ""
+    echo -e "  ${BOLD}${CYAN}════════════════════════════════════════${RESET}"
+    echo -e "  ${BOLD}CONNECTION INFO${RESET}"
+    echo -e "  ${DIM}────────────────────────────────────${RESET}"
+    echo -e "  ${DIM}IPv4:${RESET}      ${GREEN}${CONN_IPV4:-N/A}${RESET}"
+    if [[ -n "${CONN_IPV6:-}" ]] && [[ "${CONN_IPV6}" != "N/A" ]]; then
+        echo -e "  ${DIM}IPv6:${RESET}      ${CYAN}${CONN_IPV6}${RESET}"
+    else
+        echo -e "  ${DIM}IPv6:${RESET}      ${DIM}not available${RESET}"
+    fi
+    [[ "${CONN_ORG:-N/A}" != "N/A" ]] && echo -e "  ${DIM}ISP:${RESET}       ${YELLOW}${CONN_ORG}${RESET}"
+    
+    local location=""
+    [[ -n "${CONN_CITY:-}" ]] && [[ "${CONN_CITY}" != "N/A" ]] && location="${CONN_CITY}"
+    [[ -n "${CONN_REGION:-}" ]] && location="${location}${location:+, }${CONN_REGION}"
+    [[ -n "${CONN_COUNTRY:-}" ]] && location="${location}${location:+, }${CONN_COUNTRY}"
+    
+    if [[ -n "$location" ]]; then
+        echo -e "  ${DIM}Location:${RESET}   ${WHITE}${location}${RESET}"
+    fi
     echo -e "  ${CYAN}════════════════════════════════════════${RESET}"
     echo ""
 }
@@ -300,74 +361,128 @@ show_history() {
 # =============================================================================
 
 main() {
-    $SHOW_HISTORY && { show_history; exit 0; }
-    
+    if $SHOW_HISTORY; then
+        show_history
+        exit 0
+    fi
+
     print_header
-    
-    # Check deps
-    ( for cmd in curl bc python3; do command -v "$cmd" >/dev/null || exit 1; done ) &
+
+    # Check dependencies
+    (
+        for cmd in curl bc python3; do
+            if ! command -v "$cmd" >/dev/null 2>&1; then
+                echo "Missing: $cmd" >&2
+                exit 1
+            fi
+        done
+    ) &
     spinner $! "Checking dependencies"
-    
+
     # Fetch probes
-    ( fetch_probes ) &
+    (
+        fetch_probes
+    ) &
     spinner $! "Fetching servers"
-    
+
     # Get connection info
-    ( get_connection_info ) &
+    (
+        get_connection_info
+    ) &
     spinner $! "Getting connection info"
+    
     wait
     
     # Show connection info
-    if ! $JSON_OUTPUT && ! $QUIET_MODE; then
-        echo ""
-        echo -e "  ${DIM}IPv4:${RESET} ${GREEN}${CONN_IPV4:-N/A}${RESET}"
-        [[ -n "${CONN_IPV6:-}" ]] && echo -e "  ${DIM}IPv6:${RESET} ${CYAN}${CONN_IPV6}${RESET}" || echo -e "  ${DIM}IPv6:${RESET} ${DIM}not available${RESET}"
-        [[ "${CONN_ORG:-N/A}" != "N/A" ]] && echo -e "  ${DIM}ISP:${RESET} ${YELLOW}${CONN_ORG}${RESET}"
-        echo -e "  ${DIM}Location:${RESET} ${WHITE}${CONN_CITY}${CONN_REGION:+, $CONN_REGION}${CONN_COUNTRY:+, $CONN_COUNTRY}${RESET}"
-        echo ""
-    fi
-    
+    print_connection_info
+
     # Measure ping
-    ( PING_RESULT=$(measure_ping) ) &
+    (
+        PING_RESULT=$(measure_ping)
+    ) &
     spinner $! "Measuring ping"
-    IFS='|' read -r ping_avg ping_min ping_max ping_jitter <<< "$PING_RESULT"
     
+    IFS='|' read -r ping_avg ping_min ping_max ping_jitter <<< "$PING_RESULT"
+
     if ! $JSON_OUTPUT && ! $QUIET_MODE; then
         echo ""
-        echo -e "  ${BOLD}Ping:${RESET} ${WHITE}${ping_avg} ms${RESET} ${DIM}(min:${ping_min} / max:${ping_max} / jitter:${ping_jitter})${RESET}"
+        printf "  ${BOLD}Ping:${RESET} ${WHITE}%.2f ms${RESET} ${DIM}(min: %.2f / max: %.2f / jitter: %.2f)${RESET}\n" \
+            "$ping_avg" "$ping_min" "$ping_max" "$ping_jitter"
         echo ""
     fi
-    
-    # Measure speed
-    ( DOWNLOAD=$(measure_download) ) &
+
+    # Measure download
+    (
+        DOWNLOAD=$(measure_download)
+    ) &
     spinner $! "Download"
-    ( UPLOAD=$(measure_upload) ) &
+
+    # Measure upload
+    (
+        UPLOAD=$(measure_upload)
+    ) &
     spinner $! "Upload"
+
     wait
-    
-    # Save history
+
+    # Save to history
     save_history "$DOWNLOAD" "$UPLOAD" "$ping_avg"
-    
-    # Output
+
+    # Output results
     if $JSON_OUTPUT; then
         cat << EOF
-{"version":"$VERSION","download":$DOWNLOAD,"upload":$UPLOAD,"ping":$ping_avg}
+{
+  "version": "$VERSION",
+  "timestamp": "$(date -Iseconds)",
+  "connection": {
+    "ipv4": "${CONN_IPV4:-null}",
+    "ipv6": ${CONN_IPV6:+\"$CONN_IPV6\"}${CONN_IPV6:-null},
+    "isp": "${CONN_ORG:-}"
+  },
+  "results": {
+    "download": {
+      "bps": $DOWNLOAD,
+      "human": "$(format_speed "$DOWNLOAD")"
+    },
+    "upload": {
+      "bps": $UPLOAD,
+      "human": "$(format_speed "$UPLOAD")"
+    },
+    "ping": {
+      "average": $ping_avg,
+      "minimum": $ping_min,
+      "maximum": $ping_max,
+      "jitter": $ping_jitter
+    }
+  }
+}
 EOF
     else
         echo ""
         echo -e "  ${BOLD}${CYAN}╔════════════════════════════════════════╗${RESET}"
-        echo -e "  ${BOLD}${CYAN}║            SPEED TEST RESULTS         ║${RESET}"
+        echo -e "  ${BOLD}${CYAN}║         SPEED TEST RESULTS            ║${RESET}"
         echo -e "  ${BOLD}${CYAN}╠════════════════════════════════════════╣${RESET}"
-        printf "  ${CYAN}║${RESET}  %s %-8s ${GREEN}%12s${RESET}  %5s${CYAN}║${RESET}\n" \
-            "$(get_speed_emoji "$DOWNLOAD")" "Download" "$(format_speed "$DOWNLOAD")" ""
-        printf "  ${CYAN}║${RESET}  %s %-8s ${YELLOW}%12s${RESET}  %5s${CYAN}║${RESET}\n" \
-            "$(get_speed_emoji "$UPLOAD")" "Upload" "$(format_speed "$UPLOAD")" ""
+        
+        local download_emoji=$(get_speed_emoji "$DOWNLOAD")
+        local upload_emoji=$(get_speed_emoji "$UPLOAD")
+        
+        printf "  ${CYAN}║${RESET}  %s ${BOLD}%-8s${RESET}  ${GREEN}%12s${RESET}  %5s${CYAN}║${RESET}\n" \
+            "$download_emoji" "Download" "$(format_speed "$DOWNLOAD")" ""
+        printf "  ${CYAN}║${RESET}  %s ${BOLD}%-8s${RESET}  ${YELLOW}%12s${RESET}  %5s${CYAN}║${RESET}\n" \
+            "$upload_emoji" "Upload" "$(format_speed "$UPLOAD")" ""
         echo -e "  ${BOLD}${CYAN}╚════════════════════════════════════════╝${RESET}"
         echo ""
-        echo -e "  ${DIM}💾 History: $HISTORY_FILE${RESET}"
-        echo -e "  ${DIM}💡 Tip: Use --json for JSON output${RESET}"
+        
+        # Show random tip
+        local tips=(
+            "Use --json for JSON output"
+            "View history with --history"
+            "Quiet mode with --quiet"
+        )
+        local idx=$((RANDOM % ${#tips[@]}))
+        echo -e "  ${DIM}💡 Tip: ${tips[$idx]}${RESET}"
         echo ""
     fi
 }
 
-main
+main "$@"
