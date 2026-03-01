@@ -56,20 +56,25 @@ cleanup() {
 trap cleanup EXIT
 
 # --------------------------
+# Time (UTC everywhere)
+# --------------------------
+now_utc() {
+  TZ=UTC date '+%Y-%m-%d %H:%M:%S UTC'
+}
+
+# --------------------------
 # Helpers
 # --------------------------
 color() { local c="$1"; shift; printf "%s%s%s" "$c" "$*" "$RESET"; }
 bold()  { printf "%s%s%s" "$BOLD" "$*" "$RESET"; }
 
-debug() {
-  $DEBUG && echo "[DEBUG] $*" >&2 || true
-}
+debug() { $DEBUG && echo "[DEBUG] $*" >&2 || true; }
 
 need_cmd() { command -v "$1" >/dev/null 2>&1; }
 
 check_deps() {
   local missing=()
-  for cmd in curl bc python3 awk sort wc tr; do
+  for cmd in curl bc python3 awk sort wc tr sed tput; do
     need_cmd "$cmd" || missing+=("$cmd")
   done
   if (( ${#missing[@]} > 0 )); then
@@ -80,12 +85,10 @@ check_deps() {
 }
 
 fmt() {
-  # safe float formatting via bc
   printf "%.2f" "$(echo "scale=6; $1" | bc 2>/dev/null || echo "0")"
 }
 
 format_speed_bits() {
-  # input: bits/sec
   local bps="$1"
   if (( $(echo "$bps >= 1000000000" | bc -l 2>/dev/null || echo 0) )); then
     echo "$(fmt "$bps / 1000000000") Gbit/s"
@@ -108,10 +111,20 @@ subline() {
   local w; w="$(term_width)"
   printf "%s\n" "$(color "$GRAY" "$(printf '─%.0s' $(seq 1 "$w"))")"
 }
-center() {
+
+strip_ansi() {
+  # remove ANSI sequences so we can calculate visible length
+  sed -r 's/\x1B\[[0-9;]*[mK]//g'
+}
+
+center_ansi() {
   local text="$1"
-  local width; width="$(term_width)"
-  printf "%*s\n" $(( (width + ${#text}) / 2 )) "$text"
+  local plain width pad
+  plain="$(printf "%s" "$text" | strip_ansi)"
+  width="$(term_width)"
+  pad=$(( (width - ${#plain}) / 2 ))
+  (( pad < 0 )) && pad=0
+  printf "%*s%s\n" "$pad" "" "$text"
 }
 
 # --------------------------
@@ -146,10 +159,10 @@ stop_spinner() {
 # --------------------------
 print_banner() {
   line
-  center "$(color "$BRIGHT_MAGENTA" "$(bold "🚀 DATACHEAP • SPEED TEST 🚀")")"
-  center "$(color "$BRIGHT_GREEN"  "$(bold "Datacheap")")"
-  center "$(color "$YELLOW"        "$(bold "Mesheryakov&Romanov")")"
-  center "$(color "$CYAN" "Yandex Internetometer probes")"
+  center_ansi "$(color "$BRIGHT_MAGENTA" "$(bold "🚀 DATACHEAP • SPEED TEST 🚀")")"
+  center_ansi "$(color "$BRIGHT_GREEN"  "$(bold "Datacheap")")"
+  center_ansi "$(color "$YELLOW"        "$(bold "Mesheryakov&Romanov")")"
+  center_ansi "$(color "$CYAN" "Yandex Internetometer probes")"
   line
   echo
 }
@@ -157,7 +170,7 @@ print_banner() {
 print_meta() {
   echo "🖥️  $(bold "System")   : Linux / Bash"
   echo "🌐 $(bold "Mode")     : Ping / Download / Upload"
-  echo "🕒 $(bold "Started")  : $(date '+%Y-%m-%d %H:%M:%S')"
+  echo "🕒 $(bold "Started")  : $(now_utc)"
   echo "⚙️  $(bold "Tuning")   : PING_SAMPLES=$PING_SAMPLES | DL=${DOWNLOAD_SECONDS}s | UL=${UPLOAD_SECONDS}s"
   subline
 }
@@ -182,26 +195,22 @@ td = os.environ["TMPDIR_ST"]
 with open(f"{td}/probes.json", "r", encoding="utf-8") as f:
     d = json.load(f)
 
-# ping urls
 with open(f"{td}/ping_urls", "w", encoding="utf-8") as f:
     for p in d.get("latency", {}).get("probes", []):
         f.write(p["url"] + "\n")
 
-# download urls - choose 50mb only (like sample)
 with open(f"{td}/download_urls", "w", encoding="utf-8") as f:
     for p in d.get("download", {}).get("probes", []):
         url = p.get("url","")
         if "50mb" in url:
             f.write(url + "\n")
 
-# upload urls - exclude timeout endpoints (like sample)
 with open(f"{td}/upload_urls", "w", encoding="utf-8") as f:
     for p in d.get("upload", {}).get("probes", []):
         url = p.get("url","")
         if url and "timeout" not in url:
             f.write(url + "\n")
 
-# upload warmup urls
 with open(f"{td}/upload_warmup_urls", "w", encoding="utf-8") as f:
     warmup = d.get("upload", {}).get("warmup", {})
     for p in warmup.get("probes", []):
@@ -209,7 +218,6 @@ with open(f"{td}/upload_warmup_urls", "w", encoding="utf-8") as f:
         if urls:
             f.write(urls[0] + "\n")
 
-# servers list
 servers = set()
 for section in ["latency", "download", "upload"]:
     for p in d.get(section, {}).get("probes", []):
@@ -239,14 +247,12 @@ print_probe_servers() {
 }
 
 # --------------------------
-# Connection info (same idea as sample)
+# Connection info
 # --------------------------
 get_connection_info() {
   local ipv4 ipv6 info parsed city region country org
-
   ipv4="$(curl -s --max-time 5 -H "User-Agent: $UA" "$IPV4_API" 2>/dev/null | tr -d '"' || echo "N/A")"
   ipv6="$(curl -s --max-time 3 -6 -H "User-Agent: $UA" "$IPV6_API" 2>/dev/null | tr -d '"' || true)"
-
   info="$(curl -s --max-time 5 "https://ipinfo.io/${ipv4}/json" 2>/dev/null || echo '{}')"
 
   parsed="$(echo "$info" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('city','')+'|'+d.get('region','')+'|'+d.get('country','')+'|'+d.get('org',''))" 2>/dev/null || echo "|||")"
@@ -264,7 +270,7 @@ get_connection_info() {
 }
 
 # --------------------------
-# Measurements (ported from your working script)
+# Measurements
 # --------------------------
 measure_ping() {
   local results=()
@@ -272,7 +278,6 @@ measure_ping() {
   while IFS= read -r url; do
     [[ -z "$url" ]] && continue
 
-    # warmup HEAD
     curl -s -o /dev/null -I --max-time 5 \
       -H "User-Agent: $UA" \
       -H "Referer: https://yandex.ru/internet/" \
@@ -386,7 +391,6 @@ measure_download_bits() {
     total_speed="$(echo "$total_speed + ${computed:-0}" | bc)"
   done
 
-  # bytes/sec -> bits/sec
   echo "$(echo "scale=2; $total_speed * 8" | bc)"
 }
 
@@ -422,7 +426,6 @@ upload_stream() {
 }
 
 measure_upload_bits() {
-  # 50MB payload like original
   head -c 52428800 /dev/urandom > "$TMPDIR_ST/upload_payload" 2>/dev/null
   upload_warmup
 
@@ -480,7 +483,7 @@ print_results() {
   echo "   $(color "$DIM" "min: ${ping_min} ms / max: ${ping_max} ms / jitter: ${jitter} ms")"
   echo
   echo "$(color "$GRAY" "────────────────────────────────────────")"
-  echo "$(color "$DIM" "Server: Yandex CDN | $(date '+%Y-%m-%d %H:%M:%S %Z')")"
+  echo "$(color "$DIM" "Server: Yandex CDN | $(now_utc)")"
   echo
 }
 
