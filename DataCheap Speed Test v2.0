@@ -4,13 +4,13 @@
 # Mesheryakov&Romanov
 # ============================================================
 # Autonomous Linux CLI Internet Speed Test (GitHub raw friendly)
-# Ping / Download / Upload + pretty output
+# Ping / Download / Upload + pretty output (no external backend)
 # ============================================================
 
 set -Eeuo pipefail
 
 # --------------------------
-# Colors
+# Colors (safe)
 # --------------------------
 RESET=$'\033[0m'
 BOLD=$'\033[1m'
@@ -29,13 +29,13 @@ BRIGHT_CYAN=$'\033[96m'
 BRIGHT_MAGENTA=$'\033[95m'
 
 # --------------------------
-# Config
+# Config (can override via env)
 # --------------------------
 PING_HOST="${PING_HOST:-1.1.1.1}"
 DOWNLOAD_URL="${DOWNLOAD_URL:-https://speed.hetzner.de/100MB.bin}"
 UPLOAD_URL="${UPLOAD_URL:-https://httpbin.org/post}"
-UPLOAD_SIZE_MB="${UPLOAD_SIZE_MB:-10}"     # size of upload test file
-TIMEOUT="${TIMEOUT:-30}"                   # seconds
+UPLOAD_SIZE_MB="${UPLOAD_SIZE_MB:-10}"
+TIMEOUT="${TIMEOUT:-30}"
 
 TMP_DIR=""
 TEST_FILE=""
@@ -55,31 +55,36 @@ c() {
 }
 bold() { printf "%s%s%s" "$BOLD" "$*" "$RESET"; }
 
+need_cmd() { command -v "$1" >/dev/null 2>&1; }
+
 term_width() {
   local w
   w="$(tput cols 2>/dev/null || true)"
   [[ -z "${w:-}" ]] && w=72
   echo "$w"
 }
+
 repeat() {
   local char="$1" count="$2"
   printf "%*s" "$count" "" | tr ' ' "$char"
 }
+
 center() {
   local text="$1"
   local width; width="$(term_width)"
   local len=${#text}
+
   if (( len >= width )); then
     printf "%s\n" "$text"
     return
   fi
+
   local pad=$(( (width - len) / 2 ))
   printf "%*s%s\n" "$pad" "" "$text"
 }
+
 line()   { c "$BRIGHT_CYAN"  "$(repeat '═' "$(term_width)")"; }
 subline(){ c "$BRIGHT_BLACK" "$(repeat '─' "$(term_width)")"; }
-
-need_cmd() { command -v "$1" >/dev/null 2>&1; }
 
 check_deps() {
   local missing=()
@@ -99,6 +104,7 @@ format_speed() {
     else printf "%.2f Mbps", s;
   }'
 }
+
 ping_quality() {
   local p="$1"
   awk -v p="$p" 'BEGIN {
@@ -108,6 +114,7 @@ ping_quality() {
     else print "🔴 Высокий";
   }'
 }
+
 speed_quality() {
   local s="$1"
   awk -v s="$s" 'BEGIN {
@@ -118,38 +125,45 @@ speed_quality() {
   }'
 }
 
+# --------------------------
+# Pretty output
+# --------------------------
 print_banner() {
   echo "$(line)"
-  center "$(c "$BRIGHT_MAGENTA" "$(bold "🚀 DATACHEAP • INTERNET SPEED TEST 🚀")")"
-  center "$(c "$BRIGHT_GREEN"  "$(bold "Datacheap")")"
-  center "$(c "$BRIGHT_YELLOW" "$(bold "Mesheryakov&Romanov")")"
-  center "$(c "$CYAN" "Linux terminal edition • autonomous build")"
+  center "$(c "$BRIGHT_MAGENTA" "$(bold '🚀 DATACHEAP • INTERNET SPEED TEST 🚀')")"
+  center "$(c "$BRIGHT_GREEN"  "$(bold 'Datacheap')")"
+  center "$(c "$BRIGHT_YELLOW" "$(bold 'Mesheryakov&Romanov')")"
+  center "$(c "$CYAN" 'Linux terminal edition • autonomous build')"
   echo "$(line)"
   echo
 }
 
 print_meta() {
-  echo "🖥️  $(bold "System")   : Linux / Bash"
-  echo "🌐 $(bold "Mode")     : Ping / Download / Upload"
-  echo "🕒 $(bold "Started")  : $(date '+%Y-%m-%d %H:%M:%S')"
+  echo "🖥️  $(bold 'System')   : Linux / Bash"
+  echo "🌐 $(bold 'Mode')     : Ping / Download / Upload"
+  echo "🕒 $(bold 'Started')  : $(date '+%Y-%m-%d %H:%M:%S')"
   echo "$(subline)"
 }
 
-get_public_ip()      { curl -4fsS --max-time 5 https://api.ipify.org 2>/dev/null || echo "unknown"; }
-get_isp_info()       { curl -4fsS --max-time 5 https://ipinfo.io/org  2>/dev/null || echo "unknown"; }
-get_location_info()  { curl -4fsS --max-time 5 https://ipinfo.io/city 2>/dev/null || echo "unknown"; }
+get_public_ip()     { curl -4fsS --max-time 5 https://api.ipify.org 2>/dev/null || echo "unknown"; }
+get_isp_info()      { curl -4fsS --max-time 5 https://ipinfo.io/org  2>/dev/null || echo "unknown"; }
+get_location_info() { curl -4fsS --max-time 5 https://ipinfo.io/city 2>/dev/null || echo "unknown"; }
 
 print_network_info() {
   local ip isp city
   ip="$(get_public_ip)"
   isp="$(get_isp_info)"
   city="$(get_location_info)"
-  echo "🌍 $(bold "IP")       : $ip"
-  echo "🏢 $(bold "ISP")      : $isp"
-  echo "📍 $(bold "Location") : $city"
+
+  echo "🌍 $(bold 'IP')       : $ip"
+  echo "🏢 $(bold 'ISP')      : $isp"
+  echo "📍 $(bold 'Location') : $city"
   echo "$(subline)"
 }
 
+# --------------------------
+# Tests
+# --------------------------
 run_ping_test() {
   local out avg
   out="$(ping -c 4 -W 1 "$PING_HOST" 2>/dev/null || true)"
@@ -159,9 +173,9 @@ run_ping_test() {
 }
 
 run_download_test() {
-  # curl returns bytes/sec; convert to Mbps
   local bps mbps
-  bps="$(curl -L --output /dev/null --max-time "$TIMEOUT" --write-out "%{speed_download}" "$DOWNLOAD_URL" 2>/dev/null || echo "0")"
+  bps="$(curl -L --output /dev/null --max-time "$TIMEOUT" --write-out "%{speed_download}" \
+        "$DOWNLOAD_URL" 2>/dev/null || echo "0")"
   mbps="$(awk -v bps="$bps" 'BEGIN { printf "%.2f", (bps * 8) / 1000000 }')"
   echo "$mbps"
 }
@@ -176,38 +190,42 @@ run_upload_test() {
   prepare_upload_file
   local bps mbps
   bps="$(curl -X POST --output /dev/null --max-time "$TIMEOUT" --write-out "%{speed_upload}" \
-      -F "file=@${TEST_FILE}" "$UPLOAD_URL" 2>/dev/null || echo "0")"
+        -F "file=@${TEST_FILE}" "$UPLOAD_URL" 2>/dev/null || echo "0")"
   mbps="$(awk -v bps="$bps" 'BEGIN { printf "%.2f", (bps * 8) / 1000000 }')"
   echo "$mbps"
 }
 
 print_result() {
   local ping_ms="$1" down="$2" up="$3"
-  echo "📶 $(bold "Ping")     : $(c "$BRIGHT_YELLOW" "${ping_ms} ms")  $(ping_quality "$ping_ms")"
-  echo "⬇️  $(bold "Download") : $(c "$BRIGHT_GREEN" "$(format_speed "$down")")  $(speed_quality "$down")"
-  echo "⬆️  $(bold "Upload")   : $(c "$CYAN" "$(format_speed "$up")")"
+  echo "📶 $(bold 'Ping')     : $(c "$BRIGHT_YELLOW" "${ping_ms} ms")  $(ping_quality "$ping_ms")"
+  echo "⬇️  $(bold 'Download') : $(c "$BRIGHT_GREEN" "$(format_speed "$down")")  $(speed_quality "$down")"
+  echo "⬆️  $(bold 'Upload')   : $(c "$CYAN" "$(format_speed "$up")")"
 }
 
 print_footer() {
   local down="$1"
   echo "$(subline)"
+
   if awk "BEGIN{exit !($down>=300)}"; then
-    echo "🏁 $(c "$BRIGHT_GREEN" "$(bold "Вердикт: канал очень мощный")")"
+    echo "🏁 $(c "$BRIGHT_GREEN" "$(bold 'Вердикт: канал очень мощный')")"
   elif awk "BEGIN{exit !($down>=100)}"; then
-    echo "🏁 $(c "$GREEN" "$(bold "Вердикт: интернет быстрый")")"
+    echo "🏁 $(c "$GREEN" "$(bold 'Вердикт: интернет быстрый')")"
   elif awk "BEGIN{exit !($down>=30)}"; then
-    echo "🏁 $(c "$YELLOW" "$(bold "Вердикт: интернет нормальный")")"
+    echo "🏁 $(c "$YELLOW" "$(bold 'Вердикт: интернет нормальный')")"
   else
-    echo "🏁 $(c "$RED" "$(bold "Вердикт: скорость низкая, проверь сеть или тариф")")"
+    echo "🏁 $(c "$RED" "$(bold 'Вердикт: скорость низкая, проверь сеть или тариф')")"
   fi
-  echo "💙 $(c "$CYAN" "Datacheap | Mesheryakov&Romanov")"
+
+  echo "$(c "$CYAN" '💙 Datacheap | Mesheryakov&Romanov')"
 }
 
 usage() {
   cat <<'EOF'
 Usage:
-  bash <(curl -fsSL "RAW_URL")
-Options via env:
+  wget -qO- "RAW_URL" | bash
+  curl -fsSL "RAW_URL" | bash
+
+Env overrides:
   PING_HOST=1.1.1.1
   DOWNLOAD_URL=https://speed.hetzner.de/100MB.bin
   UPLOAD_URL=https://httpbin.org/post
