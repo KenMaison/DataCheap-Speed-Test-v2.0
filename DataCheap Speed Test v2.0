@@ -3,18 +3,11 @@
 # Datacheap
 # Mesheryakov&Romanov
 # ============================================================
-# Linux CLI wrapper for Yandex-style speedtest
+# Autonomous Linux CLI Internet Speed Test
+# GitHub raw friendly | no external backend
 # ============================================================
 
 set -Eeuo pipefail
-
-UPSTREAM_URL="https://raw.githubusercontent.com/StealthSurf-VPN/yandex-speedtest-cli/refs/heads/main/speedtest.sh"
-TMP_SCRIPT=""
-
-cleanup() {
-  [[ -n "${TMP_SCRIPT:-}" && -f "${TMP_SCRIPT:-}" ]] && rm -f "$TMP_SCRIPT"
-}
-trap cleanup EXIT
 
 RESET='\033[0m'
 BOLD='\033[1m'
@@ -25,12 +18,25 @@ YELLOW='\033[33m'
 BLUE='\033[34m'
 MAGENTA='\033[35m'
 CYAN='\033[36m'
+WHITE='\033[37m'
 
 BRIGHT_BLACK='\033[90m'
 BRIGHT_GREEN='\033[92m'
 BRIGHT_YELLOW='\033[93m'
 BRIGHT_CYAN='\033[96m'
 BRIGHT_MAGENTA='\033[95m'
+
+TMP_DIR=""
+TEST_FILE=""
+DOWNLOAD_URL="https://speed.hetzner.de/100MB.bin"
+UPLOAD_URL="https://httpbin.org/post"
+PING_HOST="1.1.1.1"
+
+cleanup() {
+  [[ -n "${TEST_FILE:-}" && -f "${TEST_FILE:-}" ]] && rm -f "$TEST_FILE" || true
+  [[ -n "${TMP_DIR:-}" && -d "${TMP_DIR:-}" ]] && rm -rf "$TMP_DIR" || true
+}
+trap cleanup EXIT
 
 c() {
   local color="$1"
@@ -70,25 +76,12 @@ center() {
   printf "%*s%s\n" "$pad" "" "$text"
 }
 
-print_banner() {
-  local width
-  width=$(term_width)
-
-  printf "%b\n" "$(c "$BRIGHT_CYAN" "$(repeat '═' "$width")")"
-  center "$(c "$BRIGHT_MAGENTA" "$(bold "🚀 DATACHEAP • YANDEX SPEEDTEST CLI 🚀")")"
-  center "$(c "$BRIGHT_GREEN" "$(bold "Datacheap")")"
-  center "$(c "$BRIGHT_YELLOW" "$(bold "Mesheryakov&Romanov")")"
-  center "$(c "$CYAN" "Linux terminal edition")"
-  printf "%b\n" "$(c "$BRIGHT_CYAN" "$(repeat '═' "$width")")"
-  echo
+line() {
+  c "$BRIGHT_CYAN" "$(repeat '═' "$(term_width)")"
 }
 
-print_meta() {
-  echo -e "🖥️  $(bold "System")   : Linux / Bash"
-  echo -e "🌐 $(bold "Mode")     : Yandex Internetometer style"
-  echo -e "⚡ $(bold "Test")     : Ping / Download / Upload"
-  echo -e "🕒 $(bold "Started")  : $(date '+%Y-%m-%d %H:%M:%S')"
-  echo -e "$(c "$BRIGHT_BLACK" "$(repeat '─' "$(term_width)")")"
+subline() {
+  c "$BRIGHT_BLACK" "$(repeat '─' "$(term_width)")"
 }
 
 need_cmd() {
@@ -98,7 +91,7 @@ need_cmd() {
 check_deps() {
   local missing=()
 
-  for cmd in bash curl mktemp; do
+  for cmd in bash curl awk dd date mktemp head tr ping; do
     need_cmd "$cmd" || missing+=("$cmd")
   done
 
@@ -108,39 +101,149 @@ check_deps() {
   fi
 }
 
-download_upstream() {
-  TMP_SCRIPT="$(mktemp /tmp/datacheap-speedtest.XXXXXX.sh)"
-
-  echo -e "📥 $(c "$BLUE" "Downloading speedtest backend...")"
-  if ! curl -fsSL "$UPSTREAM_URL" -o "$TMP_SCRIPT"; then
-    echo -e "$(c "$RED" "❌ Failed to download upstream script")"
-    echo -e "🔗 URL: $UPSTREAM_URL"
-    exit 1
-  fi
-
-  chmod +x "$TMP_SCRIPT"
-  echo -e "✅ $(c "$GREEN" "Backend downloaded successfully")"
-  echo -e "$(c "$BRIGHT_BLACK" "$(repeat '─' "$(term_width)")")"
+print_banner() {
+  echo -e "$(line)"
+  center "$(c "$BRIGHT_MAGENTA" "$(bold "🚀 DATACHEAP • INTERNET SPEED TEST 🚀")")"
+  center "$(c "$BRIGHT_GREEN" "$(bold "Datacheap")")"
+  center "$(c "$BRIGHT_YELLOW" "$(bold "Mesheryakov&Romanov")")"
+  center "$(c "$CYAN" "Linux terminal edition • autonomous build")"
+  echo -e "$(line)"
+  echo
 }
 
-run_test() {
-  echo -e "🚀 $(c "$BRIGHT_MAGENTA" "$(bold "Running speed test...")")"
-  echo
-  bash "$TMP_SCRIPT" "$@"
+print_meta() {
+  echo -e "🖥️  $(bold "System")   : Linux / Bash"
+  echo -e "🌐 $(bold "Mode")     : CLI speed test"
+  echo -e "⚡ $(bold "Test")     : Ping / Download / Upload"
+  echo -e "🕒 $(bold "Started")  : $(date '+%Y-%m-%d %H:%M:%S')"
+  echo -e "$(subline)"
+}
+
+format_speed() {
+  local mbps="$1"
+  awk -v s="$mbps" 'BEGIN {
+    if (s >= 1000) printf "%.2f Gbps", s/1000;
+    else printf "%.2f Mbps", s;
+  }'
+}
+
+ping_quality() {
+  local p="$1"
+  awk -v p="$p" 'BEGIN {
+    if (p <= 10) print "🟢 Отлично";
+    else if (p <= 30) print "🟡 Хорошо";
+    else if (p <= 60) print "🟠 Нормально";
+    else print "🔴 Высокий";
+  }'
+}
+
+speed_quality() {
+  local s="$1"
+  awk -v s="$s" 'BEGIN {
+    if (s >= 300) print "🚀 Очень быстро";
+    else if (s >= 100) print "⚡ Быстро";
+    else if (s >= 30) print "✅ Нормально";
+    else print "🐢 Медленно";
+  }'
+}
+
+get_public_ip() {
+  curl -4fsS --max-time 5 https://api.ipify.org 2>/dev/null || echo "unknown"
+}
+
+get_isp_info() {
+  curl -4fsS --max-time 5 https://ipinfo.io/org 2>/dev/null || echo "unknown"
+}
+
+get_location_info() {
+  curl -4fsS --max-time 5 https://ipinfo.io/city 2>/dev/null || echo "unknown"
+}
+
+run_ping_test() {
+  local out avg
+  out=$(ping -c 4 -W 1 "$PING_HOST" 2>/dev/null || true)
+  avg=$(printf "%s\n" "$out" | awk -F'/' '/^rtt|^round-trip/ {print $5}')
+  [[ -z "${avg:-}" ]] && avg="0.00"
+  printf "%.2f" "$avg"
+}
+
+run_download_test() {
+  local curl_out speed
+  curl_out=$(curl -L --progress-bar --output /dev/null \
+    --max-time 30 \
+    --write-out "%{speed_download}" \
+    "$DOWNLOAD_URL" 2>/dev/null || echo "0")
+
+  speed=$(awk -v bps="$curl_out" 'BEGIN { printf "%.2f", (bps * 8) / 1000000 }')
+  echo "$speed"
+}
+
+prepare_upload_file() {
+  TMP_DIR="$(mktemp -d /tmp/datacheap-speedtest.XXXXXX)"
+  TEST_FILE="$TMP_DIR/upload.test"
+  dd if=/dev/zero of="$TEST_FILE" bs=1M count=10 status=none
+}
+
+run_upload_test() {
+  prepare_upload_file
+
+  local curl_out speed
+  curl_out=$(curl -X POST --progress-bar \
+    --output /dev/null \
+    --max-time 30 \
+    --write-out "%{speed_upload}" \
+    -F "file=@${TEST_FILE}" \
+    "$UPLOAD_URL" 2>/dev/null || echo "0")
+
+  speed=$(awk -v bps="$curl_out" 'BEGIN { printf "%.2f", (bps * 8) / 1000000 }')
+  echo "$speed"
+}
+
+print_network_info() {
+  local ip isp city
+  ip=$(get_public_ip)
+  isp=$(get_isp_info)
+  city=$(get_location_info)
+
+  echo -e "🌍 $(bold "IP")       : ${ip}"
+  echo -e "🏢 $(bold "ISP")      : ${isp}"
+  echo -e "📍 $(bold "Location") : ${city}"
+  echo -e "$(subline)"
+}
+
+print_result() {
+  local ping_ms="$1"
+  local down_mbps="$2"
+  local up_mbps="$3"
+
+  echo -e "📶 $(bold "Ping")     : $(c "$BRIGHT_YELLOW" "${ping_ms} ms")  $(ping_quality "$ping_ms")"
+  echo -e "⬇️  $(bold "Download") : $(c "$BRIGHT_GREEN" "$(format_speed "$down_mbps")")  $(speed_quality "$down_mbps")"
+  echo -e "⬆️  $(bold "Upload")   : $(c "$CYAN" "$(format_speed "$up_mbps")")"
 }
 
 print_footer() {
-  echo
-  echo -e "$(c "$BRIGHT_BLACK" "$(repeat '─' "$(term_width)")")"
-  echo -e "🏁 $(c "$BRIGHT_GREEN" "$(bold "Test completed"))"
+  local down="$1"
+
+  echo -e "$(subline)"
+
+  if awk "BEGIN {exit !($down >= 300)}"; then
+    echo -e "🏁 $(c "$BRIGHT_GREEN" "$(bold "Вердикт: канал очень мощный"))"
+  elif awk "BEGIN {exit !($down >= 100)}"; then
+    echo -e "🏁 $(c "$GREEN" "$(bold "Вердикт: интернет быстрый"))"
+  elif awk "BEGIN {exit !($down >= 30)}"; then
+    echo -e "🏁 $(c "$YELLOW" "$(bold "Вердикт: интернет нормальный"))"
+  else
+    echo -e "🏁 $(c "$RED" "$(bold "Вердикт: скорость низкая, проверь сеть или тариф"))"
+  fi
+
   echo -e "💙 $(c "$CYAN" "Datacheap | Mesheryakov&Romanov")"
 }
 
 usage() {
   cat <<'EOF'
 Usage:
-  bash <(curl -fsSL RAW_URL)
-  bash <(curl -fsSL RAW_URL) --debug
+  bash <(curl -fsSL "RAW_URL")
+  bash <(curl -fsSL "RAW_URL") --help
 EOF
 }
 
@@ -154,9 +257,25 @@ main() {
   check_deps
   print_banner
   print_meta
-  download_upstream
-  run_test "$@"
-  print_footer
+  print_network_info
+
+  echo -e "📡 $(c "$BLUE" "Checking ping...")"
+  PING_RESULT="$(run_ping_test)"
+  echo -e "✅ $(c "$GREEN" "Ping done")"
+  echo -e "$(subline)"
+
+  echo -e "⬇️  $(c "$BLUE" "Checking download speed...")"
+  DOWNLOAD_RESULT="$(run_download_test)"
+  echo -e "✅ $(c "$GREEN" "Download test done")"
+  echo -e "$(subline)"
+
+  echo -e "⬆️  $(c "$BLUE" "Checking upload speed...")"
+  UPLOAD_RESULT="$(run_upload_test)"
+  echo -e "✅ $(c "$GREEN" "Upload test done")"
+  echo -e "$(subline)"
+
+  print_result "$PING_RESULT" "$DOWNLOAD_RESULT" "$UPLOAD_RESULT"
+  print_footer "$DOWNLOAD_RESULT"
 }
 
 main "$@"
