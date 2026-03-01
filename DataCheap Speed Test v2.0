@@ -3,9 +3,7 @@
 # Datacheap
 # Mesheryakov&Romanov
 # ============================================================
-# Linux CLI wrapper for:
-# https://github.com/StealthSurf-VPN/yandex-speedtest-cli
-# Upstream raw script is executed with a styled banner/output.
+# Linux CLI wrapper for Yandex-style speedtest
 # ============================================================
 
 set -Eeuo pipefail
@@ -18,9 +16,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# --------------------------
-# Colors
-# --------------------------
 RESET='\033[0m'
 BOLD='\033[1m'
 
@@ -30,7 +25,6 @@ YELLOW='\033[33m'
 BLUE='\033[34m'
 MAGENTA='\033[35m'
 CYAN='\033[36m'
-WHITE='\033[37m'
 
 BRIGHT_BLACK='\033[90m'
 BRIGHT_GREEN='\033[92m'
@@ -84,15 +78,15 @@ print_banner() {
   center "$(c "$BRIGHT_MAGENTA" "$(bold "🚀 DATACHEAP • YANDEX SPEEDTEST CLI 🚀")")"
   center "$(c "$BRIGHT_GREEN" "$(bold "Datacheap")")"
   center "$(c "$BRIGHT_YELLOW" "$(bold "Mesheryakov&Romanov")")"
-  center "$(c "$CYAN" "Linux terminal edition • styled wrapper")"
+  center "$(c "$CYAN" "Linux terminal edition")"
   printf "%b\n" "$(c "$BRIGHT_CYAN" "$(repeat '═' "$width")")"
   echo
 }
 
 print_meta() {
   echo -e "🖥️  $(bold "System")   : Linux / Bash"
-  echo -e "🌐 $(bold "Backend")  : Yandex Internetometer style"
-  echo -e "📦 $(bold "Source")   : StealthSurf-VPN/yandex-speedtest-cli"
+  echo -e "🌐 $(bold "Mode")     : Yandex Internetometer style"
+  echo -e "⚡ $(bold "Test")     : Ping / Download / Upload"
   echo -e "🕒 $(bold "Started")  : $(date '+%Y-%m-%d %H:%M:%S')"
   echo -e "$(c "$BRIGHT_BLACK" "$(repeat '─' "$(term_width)")")"
 }
@@ -110,236 +104,43 @@ check_deps() {
 
   if (( ${#missing[@]} > 0 )); then
     echo -e "$(c "$RED" "❌ Missing dependencies: ${missing[*]}")"
-    echo -e "👉 Install them and run again."
     exit 1
   fi
 }
 
 download_upstream() {
-  TMP_SCRIPT="$(mktemp /tmp/datacheap-yandex-speedtest.XXXXXX.sh)"
+  TMP_SCRIPT="$(mktemp /tmp/datacheap-speedtest.XXXXXX.sh)"
 
-  echo -e "📥 $(c "$BLUE" "Downloading upstream speedtest script...")"
+  echo -e "📥 $(c "$BLUE" "Downloading speedtest backend...")"
   if ! curl -fsSL "$UPSTREAM_URL" -o "$TMP_SCRIPT"; then
-    echo -e "$(c "$RED" "❌ Failed to download upstream script.")"
+    echo -e "$(c "$RED" "❌ Failed to download upstream script")"
     echo -e "🔗 URL: $UPSTREAM_URL"
     exit 1
   fi
 
   chmod +x "$TMP_SCRIPT"
-  echo -e "✅ $(c "$GREEN" "Script downloaded successfully")"
+  echo -e "✅ $(c "$GREEN" "Backend downloaded successfully")"
   echo -e "$(c "$BRIGHT_BLACK" "$(repeat '─' "$(term_width)")")"
 }
 
 run_test() {
-  echo -e "⚙️  $(c "$BRIGHT_MAGENTA" "$(bold "Running internet speed test...")")"
+  echo -e "🚀 $(c "$BRIGHT_MAGENTA" "$(bold "Running speed test...")")"
   echo
-
   bash "$TMP_SCRIPT" "$@"
 }
 
 print_footer() {
   echo
   echo -e "$(c "$BRIGHT_BLACK" "$(repeat '─' "$(term_width)")")"
-  echo -e "🏁 $(c "$BRIGHT_GREEN" "$(bold "Datacheap test finished"))"
-  echo -e "💡 Tip: use $(c "$YELLOW" "--debug") for verbose upstream output"
+  echo -e "🏁 $(c "$BRIGHT_GREEN" "$(bold "Test completed"))"
+  echo -e "💙 $(c "$CYAN" "Datacheap | Mesheryakov&Romanov")"
 }
 
 usage() {
   cat <<'EOF'
 Usage:
-  ./speedtest.sh [upstream-args]
-
-Examples:
-  ./speedtest.sh
-  ./speedtest.sh --debug
-
-Notes:
-  - This is a styled wrapper around the upstream script:
-    StealthSurf-VPN/yandex-speedtest-cli
-  - All arguments are passed through unchanged.
-EOF
-}
-
-main() {
-  if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-    print_banner
-    usage
-    exit 0
-  fi
-
-  check_deps
-  print_banner
-  print_meta
-  download_upstream
-  run_test "$@"
-  print_footer
-}
-
-main "$@"
-
-От: "Датачип" <info@datacheap.ru>
-Кому: "arteezygod" <arteezygod@icloud.com>
-Отправленные: Воскресенье, 1 Март 2026 г 16:56:54
-Тема: скрипт
-
-#!/usr/bin/env bash
-# ============================================================
-# Datacheap
-# Mesheryakov&Romanov
-# ============================================================
-# Linux CLI wrapper for:
-# https://github.com/StealthSurf-VPN/yandex-speedtest-cli
-# Upstream raw script is executed with a styled banner/output.
-# ============================================================
-
-set -Eeuo pipefail
-
-UPSTREAM_URL="https://raw.githubusercontent.com/StealthSurf-VPN/yandex-speedtest-cli/refs/heads/main/speedtest.sh"
-TMP_SCRIPT=""
-
-cleanup() {
-  [[ -n "${TMP_SCRIPT:-}" && -f "${TMP_SCRIPT:-}" ]] && rm -f "$TMP_SCRIPT"
-}
-trap cleanup EXIT
-
-# --------------------------
-# Colors
-# --------------------------
-RESET='\033[0m'
-BOLD='\033[1m'
-
-RED='\033[31m'
-GREEN='\033[32m'
-YELLOW='\033[33m'
-BLUE='\033[34m'
-MAGENTA='\033[35m'
-CYAN='\033[36m'
-WHITE='\033[37m'
-
-BRIGHT_BLACK='\033[90m'
-BRIGHT_GREEN='\033[92m'
-BRIGHT_YELLOW='\033[93m'
-BRIGHT_CYAN='\033[96m'
-BRIGHT_MAGENTA='\033[95m'
-
-c() {
-  local color="$1"
-  shift
-  printf "%b%s%b" "${color}" "$*" "${RESET}"
-}
-
-bold() {
-  printf "%b%s%b" "${BOLD}" "$*" "${RESET}"
-}
-
-term_width() {
-  local w
-  w=$(tput cols 2>/dev/null || true)
-  [[ -z "${w}" ]] && w=72
-  echo "$w"
-}
-
-repeat() {
-  local char="$1"
-  local count="$2"
-  printf "%${count}s" "" | tr ' ' "$char"
-}
-
-center() {
-  local text="$1"
-  local width
-  width=$(term_width)
-  local len=${#text}
-  if (( len >= width )); then
-    printf "%s\n" "$text"
-    return
-  fi
-  local pad=$(( (width - len) / 2 ))
-  printf "%*s%s\n" "$pad" "" "$text"
-}
-
-print_banner() {
-  local width
-  width=$(term_width)
-
-  printf "%b\n" "$(c "$BRIGHT_CYAN" "$(repeat '═' "$width")")"
-  center "$(c "$BRIGHT_MAGENTA" "$(bold "🚀 DATACHEAP • YANDEX SPEEDTEST CLI 🚀")")"
-  center "$(c "$BRIGHT_GREEN" "$(bold "Datacheap")")"
-  center "$(c "$BRIGHT_YELLOW" "$(bold "Mesheryakov&Romanov")")"
-  center "$(c "$CYAN" "Linux terminal edition • styled wrapper")"
-  printf "%b\n" "$(c "$BRIGHT_CYAN" "$(repeat '═' "$width")")"
-  echo
-}
-
-print_meta() {
-  echo -e "🖥️  $(bold "System")     : Linux / Bash"
-  echo -e "🌐 $(bold "Backend")    : Yandex Internetometer style"
-  echo -e "📦 $(bold "Source")     : StealthSurf-VPN/yandex-speedtest-cli"
-  echo -e "🕒 $(bold "Started")    : $(date '+%Y-%m-%d %H:%M:%S')"
-  echo -e "$(c "$BRIGHT_BLACK" "$(repeat '─' "$(term_width)")")"
-}
-
-need_cmd() {
-  command -v "$1" >/dev/null 2>&1
-}
-
-check_deps() {
-  local missing=()
-
-  for cmd in bash curl mktemp; do
-    need_cmd "$cmd" || missing+=("$cmd")
-  done
-
-  if (( ${#missing[@]} > 0 )); then
-    echo -e "$(c "$RED" "❌ Missing dependencies: ${missing[*]}")"
-    echo -e "👉 Install them and run again."
-    exit 1
-  fi
-}
-
-download_upstream() {
-  TMP_SCRIPT="$(mktemp /tmp/datacheap-yandex-speedtest.XXXXXX.sh)"
-
-  echo -e "📥 $(c "$BLUE" "Downloading upstream speedtest script...")"
-  if ! curl -fsSL "$UPSTREAM_URL" -o "$TMP_SCRIPT"; then
-    echo -e "$(c "$RED" "❌ Failed to download upstream script.")"
-    echo -e "🔗 URL: $UPSTREAM_URL"
-    exit 1
-  fi
-
-  chmod +x "$TMP_SCRIPT"
-  echo -e "✅ $(c "$GREEN" "Script downloaded successfully")"
-  echo -e "$(c "$BRIGHT_BLACK" "$(repeat '─' "$(term_width)")")"
-}
-
-run_test() {
-  echo -e "⚙️  $(c "$BRIGHT_MAGENTA" "$(bold "Running internet speed test...")")"
-  echo
-
-  # Pass all args directly to upstream script
-  bash "$TMP_SCRIPT" "$@"
-}
-
-print_footer() {
-  echo
-  echo -e "$(c "$BRIGHT_BLACK" "$(repeat '─' "$(term_width)")")"
-  echo -e "🏁 $(c "$BRIGHT_GREEN" "$(bold "Datacheap test finished"))"
-  echo -e "💡 Tip: use $(c "$YELLOW" "--debug") for verbose upstream output"
-}
-
-usage() {
-  cat <<'EOF'
-Usage:
-  ./datacheap-yandex-speedtest.sh [upstream-args]
-
-Examples:
-  ./datacheap-yandex-speedtest.sh
-  ./datacheap-yandex-speedtest.sh --debug
-
-Notes:
-  - This is a styled wrapper around the upstream script:
-    StealthSurf-VPN/yandex-speedtest-cli
-  - All arguments are passed through unchanged.
+  bash <(curl -fsSL RAW_URL)
+  bash <(curl -fsSL RAW_URL) --debug
 EOF
 }
 
