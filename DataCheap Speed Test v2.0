@@ -13,6 +13,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 MAGENTA='\033[0;35m'
+WHITE='\033[1;37m'
 BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
@@ -198,12 +199,6 @@ PYEOF
     server_count=$(wc -l < "$TMPDIR_ST/servers" | tr -d ' ')
 
     echo -e "  ${DIM}Found ${BOLD}${server_count}${DIM} Yandex CDN nodes${NC}"
-
-    if $DEBUG; then
-        while IFS= read -r srv; do
-            echo -e "  ${DIM}  → ${srv}${NC}"
-        done < "$TMPDIR_ST/servers"
-    fi
     echo ""
 }
 
@@ -372,14 +367,18 @@ measure_download() {
 
     for f in "$TMPDIR_ST"/dlspeed_*; do
         [ -f "$f" ] || continue
+
         stream_count=$((stream_count + 1))
 
-        local line=$(cat "$f" 2>/dev/null || echo "0 0 0")
-        local size=$(echo "$line" | awk '{print $1}')
-        local time_total=$(echo "$line" | awk '{print $2}')
+        local line
+        line=$(cat "$f" 2>/dev/null || echo "0 0 0")
+
+        local size time_total speed computed
+        size=$(echo "$line" | awk '{print $1}')
+        time_total=$(echo "$line" | awk '{print $2}')
 
         if (( $(echo "$time_total > 0" | bc -l) )); then
-            local computed=$(echo "$size * 8 / $time_total" | bc)
+            computed=$(echo "$size * 8 / $time_total" | bc)
             total_speed=$(echo "$total_speed + $computed" | bc)
         fi
     done
@@ -422,14 +421,18 @@ measure_upload() {
 
     for f in "$TMPDIR_ST"/ulspeed_*; do
         [ -f "$f" ] || continue
+
         stream_count=$((stream_count + 1))
 
-        local line=$(cat "$f" 2>/dev/null || echo "0 0 0")
-        local size=$(echo "$line" | awk '{print $1}')
-        local time_total=$(echo "$line" | awk '{print $2}')
+        local line
+        line=$(cat "$f" 2>/dev/null || echo "0 0 0")
+
+        local size time_total speed computed
+        size=$(echo "$line" | awk '{print $1}')
+        time_total=$(echo "$line" | awk '{print $2}')
 
         if (( $(echo "$time_total > 0" | bc -l) )); then
-            local computed=$(echo "$size * 8 / $time_total" | bc)
+            computed=$(echo "$size * 8 / $time_total" | bc)
             total_speed=$(echo "$total_speed + $computed" | bc)
         fi
     done
@@ -508,7 +511,6 @@ main() {
     echo ""
     
     echo -e "  ${DIM}⚡ DataCheap Speed Test completed${NC}"
-    echo -e "  ${DIM}📊 Results saved to ~/.config/datacheap-speedtest/history.csv${NC}"
     echo ""
 }
 
