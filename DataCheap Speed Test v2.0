@@ -8,11 +8,10 @@
 set -euo pipefail
 
 # =============================================================================
-# COLOR SYSTEM (with tput fallback)
+# COLOR SYSTEM
 # =============================================================================
 
 if command -v tput >/dev/null 2>&1 && tput setaf 1 >/dev/null 2>&1; then
-    # 256 colors available
     RED=$(tput setaf 196)
     GREEN=$(tput setaf 82)
     YELLOW=$(tput setaf 226)
@@ -26,171 +25,87 @@ if command -v tput >/dev/null 2>&1 && tput setaf 1 >/dev/null 2>&1; then
     BOLD=$(tput bold)
     DIM=$(tput dim)
     REVERSE=$(tput rev)
-    BLINK=$(tput blink)
     RESET=$(tput sgr0)
 else
-    # Fallback to ANSI
     RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
     BLUE='\033[0;34m'; MAGENTA='\033[0;35m'; CYAN='\033[0;36m'
     ORANGE='\033[0;33m'; PURPLE='\033[0;35m'; WHITE='\033[1;37m'
     GRAY='\033[1;30m'; BOLD='\033[1m'; DIM='\033[2m'
-    REVERSE='\033[7m'; BLINK='\033[5m'; RESET='\033[0m'
+    REVERSE='\033[7m'; RESET='\033[0m'
 fi
 
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
 
-readonly VERSION="2.0.0"
-readonly CONFIG_DIR="$HOME/.config/datacheap-speedtest"
-readonly HISTORY_FILE="$CONFIG_DIR/history.csv"
-readonly CACHE_DIR="$CONFIG_DIR/cache"
-
-# Test parameters
+VERSION="2.0.0"
+CONFIG_DIR="$HOME/.config/datacheap-speedtest"
+HISTORY_FILE="$CONFIG_DIR/history.csv"
 PING_SAMPLES=10
 DOWNLOAD_SECONDS=10
 UPLOAD_SECONDS=10
-PARALLEL_STREAMS=4
 
-# API endpoints
 PROBES_API="https://yandex.ru/internet/api/v0/get-probes"
 IPV4_API="https://ipv4-internet.yandex.net/api/v0/ip"
 IPV6_API="https://ipv6-internet.yandex.net/api/v0/ip"
-
-# User Agent
-UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
 
 # =============================================================================
 # COMMAND LINE ARGUMENTS
 # =============================================================================
 
-MODE="normal"
-SELECTED_SERVER=""
 JSON_OUTPUT=false
 QUIET_MODE=false
-DEBUG_MODE=false
 SHOW_HISTORY=false
 
-show_usage() {
-    cat << EOF
-${BOLD}${CYAN}DataCheap Speed Test v${VERSION}${RESET}
-${DIM}Mescheryakov & Romanov Industries${RESET}
-
-${BOLD}Usage:${RESET} $0 [OPTIONS]
-
-${BOLD}Options:${RESET}
-  ${GREEN}-s, --server${RESET} [ID]    Select specific server
-  ${GREEN}-j, --json${RESET}           Output in JSON format
-  ${GREEN}-h, --history${RESET}        Show test history
-  ${GREEN}-q, --quiet${RESET}          Minimal output mode
-  ${GREEN}-d, --debug${RESET}          Enable debug mode
-  ${GREEN}--help${RESET}                Show this help message
-
-${BOLD}Examples:${RESET}
-  $0                    Run speed test
-  $0 --json            JSON output for scripts
-  $0 --history         View test history
-  $0 --server 2        Use specific server
-EOF
-    exit 0
-}
-
-parse_args() {
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            -s|--server)
-                SELECTED_SERVER="$2"
-                shift 2
-                ;;
-            -j|--json)
-                JSON_OUTPUT=true
-                shift
-                ;;
-            -q|--quiet)
-                QUIET_MODE=true
-                shift
-                ;;
-            -d|--debug)
-                DEBUG_MODE=true
-                shift
-                ;;
-            -h|--history)
-                SHOW_HISTORY=true
-                shift
-                ;;
-            --help)
-                show_usage
-                ;;
-            *)
-                echo "${RED}Unknown option: $1${RESET}"
-                show_usage
-                ;;
-        esac
-    done
-}
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -j|--json) JSON_OUTPUT=true; shift ;;
+        -q|--quiet) QUIET_MODE=true; shift ;;
+        -h|--history) SHOW_HISTORY=true; shift ;;
+        --help) 
+            echo "DataCheap Speed Test v$VERSION"
+            echo "Usage: $0 [OPTIONS]"
+            echo "  -j, --json     JSON output"
+            echo "  -q, --quiet    Quiet mode"
+            echo "  -h, --history  Show history"
+            exit 0
+            ;;
+        *) shift ;;
+    esac
+done
 
 # =============================================================================
-# UTILITY FUNCTIONS
+# UTILITIES
 # =============================================================================
 
-debug_log() {
-    if $DEBUG_MODE; then
-        echo "${DIM}[DEBUG]${RESET} $*" >&2
-    fi
-}
-
-init_dirs() {
-    mkdir -p "$CONFIG_DIR" "$CACHE_DIR"
-}
-
-cleanup() {
-    if [[ -n "${TMPDIR_ST:-}" ]] && [[ -d "$TMPDIR_ST" ]]; then
-        rm -rf "$TMPDIR_ST" 2>/dev/null
-    fi
-    kill $(jobs -p) 2>/dev/null || true
-}
-
-trap cleanup EXIT
-
-fmt_float() {
-    printf "%.2f" "$(echo "scale=4; $1" | bc 2>/dev/null || echo "0")"
-}
+fmt() { printf "%.2f" "$(echo "scale=4; $1" | bc 2>/dev/null || echo "0")"; }
 
 format_speed() {
     local bps=$1
-    if (( $(echo "$bps >= 1000000000" | bc -l) )); then
-        echo "$(fmt_float "$bps / 1000000000") Gbit/s"
-    elif (( $(echo "$bps >= 1000000" | bc -l) )); then
-        echo "$(fmt_float "$bps / 1000000") Mbit/s"
-    elif (( $(echo "$bps >= 1000" | bc -l) )); then
-        echo "$(fmt_float "$bps / 1000") Kbit/s"
-    else
-        echo "$(printf "%.0f" "$(echo "$bps" | bc)") bit/s"
-    fi
+    if (( $(echo "$bps >= 1000000000" | bc -l) )); then echo "$(fmt "$bps / 1000000000") Gbit/s"
+    elif (( $(echo "$bps >= 1000000" | bc -l) )); then echo "$(fmt "$bps / 1000000") Mbit/s"
+    elif (( $(echo "$bps >= 1000" | bc -l) )); then echo "$(fmt "$bps / 1000") Kbit/s"
+    else echo "$(printf "%.0f" "$(echo "$bps" | bc)") bit/s"; fi
 }
 
 get_speed_emoji() {
     local speed=$1
-    if (( $(echo "$speed >= 1000000000" | bc -l) )); then
-        echo "🚀"
-    elif (( $(echo "$speed >= 500000000" | bc -l) )); then
-        echo "⚡"
-    elif (( $(echo "$speed >= 100000000" | bc -l) )); then
-        echo "📡"
-    else
-        echo "🐢"
-    fi
+    if (( $(echo "$speed >= 1000000000" | bc -l) )); then echo "🚀"
+    elif (( $(echo "$speed >= 500000000" | bc -l) )); then echo "⚡"
+    elif (( $(echo "$speed >= 100000000" | bc -l) )); then echo "📡"
+    else echo "🐢"; fi
 }
 
+cleanup() { rm -rf "${TMPDIR_ST:-}" 2>/dev/null; kill $(jobs -p) 2>/dev/null || true; }
+trap cleanup EXIT
+
 # =============================================================================
-# UI COMPONENTS
+# UI
 # =============================================================================
 
-print_mega_header() {
-    if $JSON_OUTPUT || $QUIET_MODE; then
-        return
-    fi
-    clear 2>/dev/null || true
+print_header() {
+    $JSON_OUTPUT || $QUIET_MODE && return
     echo "${BOLD}${CYAN}"
     echo '    ╔══════════════════════════════════════════════════╗'
     echo '    ║     ██████╗  █████╗ ████████╗ █████╗            ║'
@@ -210,42 +125,14 @@ print_mega_header() {
     printf "    ║${RESET}${DIM}%40s${RESET}${CYAN}║\n" "Mescheryakov & Romanov"
     echo '    ╚══════════════════════════════════════════════════╝'
     echo "${RESET}"
-    echo ""
-}
-
-print_progress_bar() {
-    local current=$1
-    local total=$2
-    local width=40
-    local percentage=0
-    
-    if [ "$total" -gt 0 ]; then
-        percentage=$((current * 100 / total))
-    fi
-    
-    local filled=$((current * width / total))
-    
-    printf "\r  ${CYAN}[${RESET}"
-    for ((i=0; i<filled; i++)); do printf "${GREEN}█${RESET}"; done
-    for ((i=filled; i<width; i++)); do printf "${DIM}░${RESET}"; done
-    printf "${CYAN}]${RESET} ${BOLD}%3d%%${RESET}" "$percentage"
 }
 
 spinner() {
-    local pid=$1
-    local msg="$2"
-    local spin='⣾⣽⣻⢿⡿⣟⣯⣷'
-    
-    if $JSON_OUTPUT || $QUIET_MODE; then
-        wait "$pid" 2>/dev/null
-        return
-    fi
-    
-    local i=0
+    $JSON_OUTPUT || $QUIET_MODE && { wait "$1" 2>/dev/null; return; }
+    local pid=$1 msg="$2" spin='⣾⣽⣻⢿⡿⣟⣯⣷' i=0
     while kill -0 "$pid" 2>/dev/null; do
         printf "\r  ${CYAN}${spin:$((i % 8)):1}${RESET} ${msg}... "
-        i=$((i + 1))
-        sleep 0.1
+        i=$((i + 1)); sleep 0.1
     done
     wait "$pid" 2>/dev/null
     printf "\r  ${GREEN}✓${RESET} ${msg}... ${GREEN}Done${RESET}  \n"
@@ -256,423 +143,156 @@ spinner() {
 # =============================================================================
 
 fetch_probes() {
-    debug_log "Fetching probes from Yandex API"
-    
-    TMPDIR_ST=$(mktemp -d "/tmp/datacheap.XXXXXX" 2>/dev/null || echo "")
-    if [[ -z "$TMPDIR_ST" ]] || [[ ! -d "$TMPDIR_ST" ]]; then
-        TMPDIR_ST="/tmp/datacheap.$$"
-        mkdir -p "$TMPDIR_ST"
-    fi
+    TMPDIR_ST=$(mktemp -d "/tmp/datacheap.XXXXXX" 2>/dev/null || echo "/tmp/datacheap.$$")
+    mkdir -p "$TMPDIR_ST"
     
     local raw
-    raw=$(curl -s --max-time 10 \
-        -H "User-Agent: $UA" \
-        -H "Referer: https://yandex.ru/internet/" \
-        -H "Accept: application/json" \
-        "$PROBES_API" 2>/dev/null)
-    
-    if [[ -z "$raw" ]]; then
-        echo "${RED}Failed to fetch probe servers from Yandex${RESET}" >&2
-        exit 1
-    fi
+    raw=$(curl -s --max-time 10 -H "User-Agent: $UA" -H "Accept: application/json" "$PROBES_API" 2>/dev/null)
+    [[ -z "$raw" ]] && { echo "${RED}Failed to fetch servers${RESET}" >&2; exit 1; }
     
     echo "$raw" > "$TMPDIR_ST/probes.json"
     
-    # Parse JSON with Python
-    TMPDIR_ST="$TMPDIR_ST" python3 << 'PYEOF' 2>/dev/null
-import json, os, sys
-
-td = os.environ["TMPDIR_ST"]
-
-try:
-    with open(f"{td}/probes.json") as f:
-        d = json.load(f)
-    
-    # Save ping URLs
-    with open(f"{td}/ping_urls", "w") as f:
-        for p in d.get("latency", {}).get("probes", []):
-            f.write(p["url"] + "\n")
-    
-    # Save download URLs (50mb files)
-    with open(f"{td}/download_urls", "w") as f:
-        for p in d.get("download", {}).get("probes", []):
-            url = p["url"]
-            if "50mb" in url:
-                f.write(url + "\n")
-    
-    # Save upload URLs
-    with open(f"{td}/upload_urls", "w") as f:
-        for p in d.get("upload", {}).get("probes", []):
-            url = p["url"]
-            if "timeout" not in url:
-                f.write(url + "\n")
-    
-    # Save server list
-    servers = set()
-    for section in ["latency", "download", "upload"]:
-        for p in d.get(section, {}).get("probes", []):
-            url = p.get("url", "")
-            if url:
-                host = url.split("/")[2]
-                servers.add(host)
-    
-    with open(f"{td}/servers", "w") as f:
-        for s in sorted(servers):
-            f.write(s + "\n")
-    
-    # Save for caching
-    cache_dir = os.path.expanduser("~/.config/datacheap-speedtest/cache")
-    os.makedirs(cache_dir, exist_ok=True)
-    with open(f"{cache_dir}/servers.json", "w") as f:
-        json.dump(list(servers), f)
-        
-except Exception as e:
-    sys.stderr.write(f"Python error: {e}\n")
-    sys.exit(1)
+    python3 << PYEOF 2>/dev/null
+import json, os
+td = os.environ['TMPDIR_ST']
+with open(f"{td}/probes.json") as f: d = json.load(f)
+with open(f"{td}/ping_urls", "w") as f:
+    for p in d.get("latency", {}).get("probes", []): f.write(p["url"] + "\n")
+with open(f"{td}/download_urls", "w") as f:
+    for p in d.get("download", {}).get("probes", []):
+        if "50mb" in p["url"]: f.write(p["url"] + "\n")
+with open(f"{td}/upload_urls", "w") as f:
+    for p in d.get("upload", {}).get("probes", []):
+        if "timeout" not in p["url"]: f.write(p["url"] + "\n")
 PYEOF
-    
-    local server_count
-    server_count=$(wc -l < "$TMPDIR_ST/servers" | tr -d ' ')
-    
-    if ! $JSON_OUTPUT && ! $QUIET_MODE; then
-        echo -e "  ${DIM}Found ${BOLD}${server_count}${DIM} Yandex CDN nodes${RESET}"
-        if [[ -n "$SELECTED_SERVER" ]]; then
-            echo -e "  ${DIM}Selected: ${CYAN}$(sed -n "${SELECTED_SERVER}p" "$TMPDIR_ST/servers")${RESET}"
-        fi
-    fi
-    
-    debug_log "Servers: $(cat "$TMPDIR_ST/servers" | tr '\n' ' ')"
 }
 
 get_connection_info() {
-    debug_log "Getting connection info"
-    
-    local ipv4 ipv6 info parsed city region country org
-    
-    ipv4=$(curl -s --max-time 5 -H "User-Agent: $UA" "$IPV4_API" 2>/dev/null | tr -d '"' || echo "N/A")
-    ipv6=$(curl -s --max-time 3 -6 -H "User-Agent: $UA" "$IPV6_API" 2>/dev/null | tr -d '"' || echo "")
+    local ipv4 ipv6 info
+    ipv4=$(curl -s --max-time 5 "$IPV4_API" 2>/dev/null | tr -d '"' || echo "N/A")
+    ipv6=$(curl -s --max-time 3 -6 "$IPV6_API" 2>/dev/null | tr -d '"' || echo "")
     info=$(curl -s --max-time 5 "https://ipinfo.io/${ipv4}/json" 2>/dev/null || echo '{}')
     
-    parsed=$(echo "$info" | python3 -c "
-import json, sys
-try:
-    d = json.load(sys.stdin)
-    print(d.get('city','') + '|' + d.get('region','') + '|' + d.get('country','') + '|' + d.get('org',''))
-except:
-    print('|||')
-" 2>/dev/null || echo "|||")
-    
-    IFS='|' read -r city region country org <<< "$parsed"
-    
-    CONN_INFO_IPV4="$ipv4"
-    CONN_INFO_IPV6="$ipv6"
-    CONN_INFO_CITY="$city"
-    CONN_INFO_REGION="$region"
-    CONN_INFO_COUNTRY="$country"
-    CONN_INFO_ORG="$org"
-}
-
-print_connection_info() {
-    if $JSON_OUTPUT || $QUIET_MODE; then
-        return
-    fi
-    
-    echo ""
-    echo -e "  ${BOLD}${CYAN}════════════════════════════════════════════════════${RESET}"
-    echo -e "  ${BOLD}CONNECTION INFO${RESET}"
-    echo -e "  ${DIM}────────────────────────────────────────────────${RESET}"
-    echo -e "  ${DIM}IPv4:${RESET}      ${GREEN}${CONN_INFO_IPV4:-N/A}${RESET}"
-    
-    if [[ -n "${CONN_INFO_IPV6:-}" ]]; then
-        echo -e "  ${DIM}IPv6:${RESET}      ${CYAN}${CONN_INFO_IPV6}${RESET}"
-    else
-        echo -e "  ${DIM}IPv6:${RESET}      ${DIM}not available${RESET}"
-    fi
-    
-    [[ -n "${CONN_INFO_ORG:-}" ]] && echo -e "  ${DIM}ISP:${RESET}       ${YELLOW}${CONN_INFO_ORG}${RESET}"
-    [[ -n "${CONN_INFO_CITY:-}" ]] && echo -e "  ${DIM}Location:${RESET}  ${WHITE}${CONN_INFO_CITY}${CONN_INFO_REGION:+, $CONN_INFO_REGION}${CONN_INFO_COUNTRY:+, $CONN_INFO_COUNTRY}${RESET}"
-    echo -e "  ${CYAN}════════════════════════════════════════════════════${RESET}"
-    echo ""
+    CONN_IPV4="$ipv4"; CONN_IPV6="$ipv6"
+    CONN_ORG=$(echo "$info" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('org',''))" 2>/dev/null || echo "N/A")
+    CONN_CITY=$(echo "$info" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('city',''))" 2>/dev/null || echo "N/A")
+    CONN_REGION=$(echo "$info" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('region',''))" 2>/dev/null || echo "N/A")
+    CONN_COUNTRY=$(echo "$info" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('country',''))" 2>/dev/null || echo "N/A")
 }
 
 measure_ping() {
-    debug_log "Measuring ping"
-    
     local results=()
-    local ping_urls_file="$TMPDIR_ST/ping_urls"
-    
-    if [[ ! -f "$ping_urls_file" ]]; then
-        echo "0.00|0.00|0.00|0.00"
-        return
-    }
-    
     while IFS= read -r url; do
         [[ -z "$url" ]] && continue
-        
-        # Warmup
-        curl -s -o /dev/null -I --max-time 5 -H "User-Agent: $UA" "$url" 2>/dev/null || true
-        
         for i in $(seq 1 $PING_SAMPLES); do
             local timing
-            timing=$(curl -s -o /dev/null -w "%{time_starttransfer} %{time_appconnect}" \
-                -I --max-time 5 -H "User-Agent: $UA" -H "Referer: https://yandex.ru/internet/" \
-                "$url" 2>/dev/null || echo "0 0")
-            
-            local ts ta ms
-            ts=$(echo "$timing" | awk '{print $1}')
-            ta=$(echo "$timing" | awk '{print $2}')
-            ms=$(echo "($ts - $ta) * 1000" | bc 2>/dev/null || echo "0")
-            
-            if (( $(echo "$ms > 0" | bc -l) )); then
-                results+=("$ms")
-            fi
+            timing=$(curl -s -o /dev/null -w "%{time_starttransfer} %{time_appconnect}" -I --max-time 5 "$url" 2>/dev/null || echo "0 0")
+            local ts=$(echo "$timing" | awk '{print $1}')
+            local ta=$(echo "$timing" | awk '{print $2}')
+            local ms=$(echo "($ts - $ta) * 1000" | bc 2>/dev/null || echo "0")
+            (( $(echo "$ms > 0" | bc -l) )) && results+=("$ms")
         done
-    done < "$ping_urls_file"
+    done < "$TMPDIR_ST/ping_urls"
     
     local count=${#results[@]}
-    if [[ $count -eq 0 ]]; then
-        echo "0.00|0.00|0.00|0.00"
-        return
-    fi
+    [[ $count -eq 0 ]] && { echo "0.00|0.00|0.00|0.00"; return; }
     
-    # Sort results
     IFS=$'\n' sorted=($(printf '%s\n' "${results[@]}" | sort -g))
     unset IFS
-    
     local trim=$((count / 4))
-    local total=0 min=999999 max=0 trimmed_count=0
+    local total=0 min=999999 max=0 trimmed=0
     
     for idx in $(seq $trim $((count - trim - 1))); do
         local val=${sorted[$idx]}
         total=$(echo "$total + $val" | bc)
-        trimmed_count=$((trimmed_count + 1))
-        
-        if (( $(echo "$val < $min" | bc -l) )); then min=$val; fi
-        if (( $(echo "$val > $max" | bc -l) )); then max=$val; fi
+        trimmed=$((trimmed + 1))
+        (( $(echo "$val < $min" | bc -l) )) && min=$val
+        (( $(echo "$val > $max" | bc -l) )) && max=$val
     done
     
-    if [[ $trimmed_count -eq 0 ]]; then
-        echo "0.00|0.00|0.00|0.00"
-        return
-    fi
-    
-    local avg jitter_sum=0 prev=""
-    avg=$(fmt_float "$total / $trimmed_count")
-    
+    local avg=$(fmt "$total / $trimmed")
+    local jitter=0 prev=""
     for idx in $(seq $trim $((count - trim - 1))); do
         local val=${sorted[$idx]}
         if [[ -n "$prev" ]]; then
-            local diff
-            diff=$(echo "$val - $prev" | bc)
+            local diff=$(echo "$val - $prev" | bc)
             diff=$(echo "${diff#-}" | bc)
-            jitter_sum=$(echo "$jitter_sum + $diff" | bc)
+            jitter=$(echo "$jitter + $diff" | bc)
         fi
         prev=$val
     done
+    jitter=$(fmt "$jitter / ($trimmed - 1)" 2>/dev/null || echo "0.00")
     
-    local jitter
-    jitter=$(fmt_float "$jitter_sum / ($trimmed_count - 1)" 2>/dev/null || echo "0.00")
-    min=$(fmt_float "$min / 1")
-    max=$(fmt_float "$max / 1")
-    
-    echo "$avg|$min|$max|$jitter"
-}
-
-download_stream() {
-    local url=$1
-    local result_file=$2
-    local duration=$3
-    
-    local output
-    output=$(curl -s -o /dev/null -w "%{size_download} %{time_total} %{speed_download}" \
-        --max-time "$duration" -H "User-Agent: $UA" -H "Referer: https://yandex.ru/internet/" \
-        "$url" 2>/dev/null) || true
-    
-    echo "${output:-0 0 0}" > "$result_file"
+    echo "$avg|$(fmt "$min / 1")|$(fmt "$max / 1")|$jitter"
 }
 
 measure_download() {
-    debug_log "Measuring download"
-    
     local idx=0 pids=()
-    local download_urls_file="$TMPDIR_ST/download_urls"
-    
-    if [[ ! -f "$download_urls_file" ]]; then
-        echo "0"
-        return
-    fi
-    
     while IFS= read -r url; do
         [[ -z "$url" ]] && continue
         idx=$((idx + 1))
-        download_stream "$url" "$TMPDIR_ST/dlspeed_${idx}" "$DOWNLOAD_SECONDS" &
+        (
+            local out=$(curl -s -o /dev/null -w "%{size_download} %{time_total}" --max-time "$DOWNLOAD_SECONDS" "$url" 2>/dev/null || echo "0 0")
+            echo "$out" > "$TMPDIR_ST/dlspeed_${idx}"
+        ) &
         pids+=($!)
-        debug_log "Started download stream $idx"
-    done < "$download_urls_file"
+    done < "$TMPDIR_ST/download_urls"
     
-    for pid in "${pids[@]}"; do
-        wait "$pid" 2>/dev/null || true
-    done
+    for pid in "${pids[@]}"; do wait "$pid" 2>/dev/null || true; done
     
-    local total_speed=0 stream_count=0
+    local total=0
     for f in "$TMPDIR_ST"/dlspeed_*; do
         [[ -f "$f" ]] || continue
-        stream_count=$((stream_count + 1))
-        
-        local line size time_total computed
-        line=$(cat "$f" 2>/dev/null || echo "0 0 0")
-        size=$(echo "$line" | awk '{print $1}')
-        time_total=$(echo "$line" | awk '{print $2}')
-        
-        if (( $(echo "$time_total > 0" | bc -l) )); then
-            computed=$(echo "$size * 8 / $time_total" | bc)
-        else
-            computed=0
-        fi
-        total_speed=$(echo "$total_speed + $computed" | bc)
+        local line=$(cat "$f" 2>/dev/null || echo "0 0")
+        local size=$(echo "$line" | awk '{print $1}')
+        local time=$(echo "$line" | awk '{print $2}')
+        (( $(echo "$time > 0" | bc -l) )) && total=$(echo "$total + $size * 8 / $time" | bc)
     done
-    
-    echo "$total_speed"
+    echo "$total"
 }
 
 measure_upload() {
-    debug_log "Measuring upload"
-    
     local idx=0 pids=()
-    local upload_urls_file="$TMPDIR_ST/upload_urls"
-    
-    if [[ ! -f "$upload_urls_file" ]]; then
-        echo "0"
-        return
-    fi
-    
     while IFS= read -r url; do
         [[ -z "$url" ]] && continue
         idx=$((idx + 1))
-        
         (
-            local data_file="$TMPDIR_ST/upload_data_${idx}"
-            dd if=/dev/urandom bs=1M count=10 of="$data_file" 2>/dev/null
-            
-            local output
-            output=$(curl -s -o /dev/null -w "%{size_upload} %{time_total} %{speed_upload}" \
-                --max-time "$UPLOAD_SECONDS" -H "User-Agent: $UA" \
-                -H "Referer: https://yandex.ru/internet/" \
-                -F "file=@$data_file" "$url" 2>/dev/null) || true
-            
-            echo "${output:-0 0 0}" > "$TMPDIR_ST/ulspeed_${idx}"
+            local data="$TMPDIR_ST/upload_data_${idx}"
+            dd if=/dev/urandom bs=1M count=10 of="$data" 2>/dev/null
+            local out=$(curl -s -o /dev/null -w "%{size_upload} %{time_total}" --max-time "$UPLOAD_SECONDS" -F "file=@$data" "$url" 2>/dev/null || echo "0 0")
+            echo "$out" > "$TMPDIR_ST/ulspeed_${idx}"
         ) &
         pids+=($!)
-        debug_log "Started upload stream $idx"
-    done < "$upload_urls_file"
+    done < "$TMPDIR_ST/upload_urls"
     
-    for pid in "${pids[@]}"; do
-        wait "$pid" 2>/dev/null || true
-    done
+    for pid in "${pids[@]}"; do wait "$pid" 2>/dev/null || true; done
     
-    local total_speed=0 stream_count=0
+    local total=0
     for f in "$TMPDIR_ST"/ulspeed_*; do
         [[ -f "$f" ]] || continue
-        stream_count=$((stream_count + 1))
-        
-        local line size time_total computed
-        line=$(cat "$f" 2>/dev/null || echo "0 0 0")
-        size=$(echo "$line" | awk '{print $1}')
-        time_total=$(echo "$line" | awk '{print $2}')
-        
-        if (( $(echo "$time_total > 0" | bc -l) )); then
-            computed=$(echo "$size * 8 / $time_total" | bc)
-        else
-            computed=0
-        fi
-        total_speed=$(echo "$total_speed + $computed" | bc)
+        local line=$(cat "$f" 2>/dev/null || echo "0 0")
+        local size=$(echo "$line" | awk '{print $1}')
+        local time=$(echo "$line" | awk '{print $2}')
+        (( $(echo "$time > 0" | bc -l) )) && total=$(echo "$total + $size * 8 / $time" | bc)
     done
-    
-    echo "$total_speed"
+    echo "$total"
 }
 
-save_result() {
-    local download=$1
-    local upload=$2
-    local ping_avg=$3
-    local ping_min=$4
-    local ping_max=$5
-    local ping_jitter=$6
-    
-    local timestamp
-    timestamp=$(date +"%Y-%m-%d %H:%M:%S")
-    
-    # Create header if file doesn't exist
-    if [[ ! -f "$HISTORY_FILE" ]]; then
-        echo "timestamp,download_bps,upload_bps,ping_avg_ms,ping_min_ms,ping_max_ms,ping_jitter_ms,isp,location" > "$HISTORY_FILE"
-    fi
-    
-    # Clean ISP/location for CSV
-    local isp_clean="${CONN_INFO_ORG//,/ }"
-    local loc_clean="${CONN_INFO_CITY}${CONN_INFO_REGION:+, $CONN_INFO_REGION}${CONN_INFO_COUNTRY:+, $CONN_INFO_COUNTRY}"
-    loc_clean="${loc_clean//,/ }"
-    
-    echo "$timestamp,$download,$upload,$ping_avg,$ping_min,$ping_max,$ping_jitter,\"$isp_clean\",\"$loc_clean\"" >> "$HISTORY_FILE"
+save_history() {
+    mkdir -p "$CONFIG_DIR"
+    [[ ! -f "$HISTORY_FILE" ]] && echo "timestamp,download,upload,ping" > "$HISTORY_FILE"
+    echo "$(date +%Y-%m-%d\ %H:%M:%S),$1,$2,$3" >> "$HISTORY_FILE"
 }
 
 show_history() {
-    if [[ ! -f "$HISTORY_FILE" ]]; then
-        echo "${YELLOW}No test history found${RESET}"
-        return
-    fi
-    
+    [[ ! -f "$HISTORY_FILE" ]] && { echo "${YELLOW}No history${RESET}"; return; }
     echo ""
-    echo -e "  ${BOLD}${CYAN}════════════════════════════════════════════════════${RESET}"
-    echo -e "  ${BOLD}TEST HISTORY (last 10)${RESET}"
-    echo -e "  ${DIM}────────────────────────────────────────────────${RESET}"
-    
-    # Use column for pretty formatting, tail for last 10
-    tail -n 10 "$HISTORY_FILE" | column -t -s ',' | while IFS= read -r line; do
-        echo "  $line"
-    done
-    
-    echo -e "  ${CYAN}════════════════════════════════════════════════════${RESET}"
+    echo -e "  ${BOLD}${CYAN}════════════════════════════════════════${RESET}"
+    echo -e "  ${BOLD}TEST HISTORY${RESET}"
+    echo -e "  ${DIM}────────────────────────────────────${RESET}"
+    tail -n 5 "$HISTORY_FILE" | column -t -s ',' | while read line; do echo "  $line"; done
+    echo -e "  ${CYAN}════════════════════════════════════════${RESET}"
     echo ""
-}
-
-output_json() {
-    local download=$1
-    local upload=$2
-    local ping_avg=$3
-    local ping_min=$4
-    local ping_max=$5
-    local ping_jitter=$6
-    
-    cat << EOF
-{
-  "version": "$VERSION",
-  "timestamp": "$(date -Iseconds)",
-  "connection": {
-    "ipv4": "${CONN_INFO_IPV4:-null}",
-    "ipv6": ${CONN_INFO_IPV6:+\"$CONN_INFO_IPV6\"}${CONN_INFO_IPV6:-null},
-    "isp": "${CONN_INFO_ORG:-}",
-    "city": "${CONN_INFO_CITY:-}",
-    "region": "${CONN_INFO_REGION:-}",
-    "country": "${CONN_INFO_COUNTRY:-}"
-  },
-  "results": {
-    "download": {
-      "bps": $download,
-      "human": "$(format_speed "$download")"
-    },
-    "upload": {
-      "bps": $upload,
-      "human": "$(format_speed "$upload")"
-    },
-    "ping": {
-      "average": $ping_avg,
-      "minimum": $ping_min,
-      "maximum": $ping_max,
-      "jitter": $ping_jitter
-    }
-  }
-}
-EOF
 }
 
 # =============================================================================
@@ -680,144 +300,74 @@ EOF
 # =============================================================================
 
 main() {
-    parse_args "$@"
-    init_dirs
+    $SHOW_HISTORY && { show_history; exit 0; }
     
-    if $SHOW_HISTORY; then
-        show_history
-        exit 0
-    fi
+    print_header
     
-    # Show header
-    print_mega_header
-    
-    # Initial setup
-    if ! $QUIET_MODE && ! $JSON_OUTPUT; then
-        echo -e "  ${BOLD}Initializing...${RESET}"
-    fi
-    
-    # Check dependencies
-    (
-        local missing=()
-        for cmd in curl bc python3; do
-            if ! command -v "$cmd" &>/dev/null; then
-                missing+=("$cmd")
-            fi
-        done
-        
-        if [[ ${#missing[@]} -gt 0 ]]; then
-            echo "${RED}Missing dependencies: ${missing[*]}${RESET}" >&2
-            exit 1
-        fi
-    ) &
+    # Check deps
+    ( for cmd in curl bc python3; do command -v "$cmd" >/dev/null || exit 1; done ) &
     spinner $! "Checking dependencies"
     
     # Fetch probes
-    (
-        fetch_probes
-    ) &
-    spinner $! "Fetching probe servers"
+    ( fetch_probes ) &
+    spinner $! "Fetching servers"
     
     # Get connection info
-    (
-        get_connection_info
-    ) &
+    ( get_connection_info ) &
     spinner $! "Getting connection info"
-    
-    # Wait for async tasks
     wait
     
     # Show connection info
-    print_connection_info
+    if ! $JSON_OUTPUT && ! $QUIET_MODE; then
+        echo ""
+        echo -e "  ${DIM}IPv4:${RESET} ${GREEN}${CONN_IPV4:-N/A}${RESET}"
+        [[ -n "${CONN_IPV6:-}" ]] && echo -e "  ${DIM}IPv6:${RESET} ${CYAN}${CONN_IPV6}${RESET}" || echo -e "  ${DIM}IPv6:${RESET} ${DIM}not available${RESET}"
+        [[ "${CONN_ORG:-N/A}" != "N/A" ]] && echo -e "  ${DIM}ISP:${RESET} ${YELLOW}${CONN_ORG}${RESET}"
+        echo -e "  ${DIM}Location:${RESET} ${WHITE}${CONN_CITY}${CONN_REGION:+, $CONN_REGION}${CONN_COUNTRY:+, $CONN_COUNTRY}${RESET}"
+        echo ""
+    fi
     
     # Measure ping
-    (
-        PING_RESULT=$(measure_ping)
-    ) &
+    ( PING_RESULT=$(measure_ping) ) &
     spinner $! "Measuring ping"
-    
-    # Parse ping results
     IFS='|' read -r ping_avg ping_min ping_max ping_jitter <<< "$PING_RESULT"
     
     if ! $JSON_OUTPUT && ! $QUIET_MODE; then
         echo ""
-        echo -e "  ${BOLD}${CYAN}════════════════════════════════════════════════════${RESET}"
-        echo -e "  ${BOLD}LATENCY${RESET}"
-        echo -e "  ${DIM}────────────────────────────────────────────────${RESET}"
-        printf "  ${DIM}Average:${RESET}  ${WHITE}%.2f ms${RESET}\n" "$ping_avg"
-        printf "  ${DIM}Min/Max:${RESET}  ${GREEN}%.2f${RESET} / ${RED}%.2f${RESET} ms\n" "$ping_min" "$ping_max"
-        printf "  ${DIM}Jitter:${RESET}   ${YELLOW}%.2f${RESET} ms\n" "$ping_jitter"
-        echo -e "  ${CYAN}════════════════════════════════════════════════════${RESET}"
+        echo -e "  ${BOLD}Ping:${RESET} ${WHITE}${ping_avg} ms${RESET} ${DIM}(min:${ping_min} / max:${ping_max} / jitter:${ping_jitter})${RESET}"
         echo ""
     fi
     
-    # Measure download with progress
-    if ! $QUIET_MODE && ! $JSON_OUTPUT; then
-        echo -e "  ${BOLD}Testing speed...${RESET}"
-        echo -e "  ${DIM}────────────────────────────────────────────────${RESET}"
-    fi
-    
-    DOWNLOAD_SPEED=0
-    (
-        DOWNLOAD_SPEED=$(measure_download)
-    ) &
+    # Measure speed
+    ( DOWNLOAD=$(measure_download) ) &
     spinner $! "Download"
-    
-    UPLOAD_SPEED=0
-    (
-        UPLOAD_SPEED=$(measure_upload)
-    ) &
+    ( UPLOAD=$(measure_upload) ) &
     spinner $! "Upload"
-    
     wait
     
-    # Save to history
-    save_result "$DOWNLOAD_SPEED" "$UPLOAD_SPEED" "$ping_avg" "$ping_min" "$ping_max" "$ping_jitter"
+    # Save history
+    save_history "$DOWNLOAD" "$UPLOAD" "$ping_avg"
     
-    # Output results
+    # Output
     if $JSON_OUTPUT; then
-        output_json "$DOWNLOAD_SPEED" "$UPLOAD_SPEED" "$ping_avg" "$ping_min" "$ping_max" "$ping_jitter"
+        cat << EOF
+{"version":"$VERSION","download":$DOWNLOAD,"upload":$UPLOAD,"ping":$ping_avg}
+EOF
     else
         echo ""
-        echo -e "  ${BOLD}${CYAN}╔════════════════════════════════════════════════════╗${RESET}"
-        echo -e "  ${BOLD}${CYAN}║                    RESULTS                        ║${RESET}"
-        echo -e "  ${BOLD}${CYAN}╠════════════════════════════════════════════════════╣${RESET}"
-        
-        local download_emoji upload_emoji
-        download_emoji=$(get_speed_emoji "$DOWNLOAD_SPEED")
-        upload_emoji=$(get_speed_emoji "$UPLOAD_SPEED")
-        
-        printf "  ${CYAN}║${RESET}  ${download_emoji} ${BOLD}%-8s${RESET}  ${GREEN}%12s${RESET}  %20s${CYAN}║${RESET}\n" \
-            "Download" "$(format_speed "$DOWNLOAD_SPEED")" ""
-        printf "  ${CYAN}║${RESET}  ${upload_emoji} ${BOLD}%-8s${RESET}  ${YELLOW}%12s${RESET}  %20s${CYAN}║${RESET}\n" \
-            "Upload" "$(format_speed "$UPLOAD_SPEED")" ""
-        printf "  ${CYAN}║${RESET}  🎯 ${BOLD}%-8s${RESET}  ${WHITE}%7.2f ms${RESET}  ${DIM}(min:%.2f / max:%.2f)${RESET}  ${CYAN}║${RESET}\n" \
-            "Ping" "$ping_avg" "$ping_min" "$ping_max"
-        printf "  ${CYAN}║${RESET}  📊 ${BOLD}%-8s${RESET}  ${MAGENTA}%7.2f ms${RESET}  %22s${CYAN}║${RESET}\n" \
-            "Jitter" "$ping_jitter" ""
-        
-        echo -e "  ${BOLD}${CYAN}╚════════════════════════════════════════════════════╝${RESET}"
+        echo -e "  ${BOLD}${CYAN}╔════════════════════════════════════════╗${RESET}"
+        echo -e "  ${BOLD}${CYAN}║            SPEED TEST RESULTS         ║${RESET}"
+        echo -e "  ${BOLD}${CYAN}╠════════════════════════════════════════╣${RESET}"
+        printf "  ${CYAN}║${RESET}  %s %-8s ${GREEN}%12s${RESET}  %5s${CYAN}║${RESET}\n" \
+            "$(get_speed_emoji "$DOWNLOAD")" "Download" "$(format_speed "$DOWNLOAD")" ""
+        printf "  ${CYAN}║${RESET}  %s %-8s ${YELLOW}%12s${RESET}  %5s${CYAN}║${RESET}\n" \
+            "$(get_speed_emoji "$UPLOAD")" "Upload" "$(format_speed "$UPLOAD")" ""
+        echo -e "  ${BOLD}${CYAN}╚════════════════════════════════════════╝${RESET}"
         echo ""
-        
-        if [[ -f "$HISTORY_FILE" ]]; then
-            local test_count
-            test_count=$(wc -l < "$HISTORY_FILE" | tr -d ' ')
-            test_count=$((test_count - 1))  # Subtract header
-            echo -e "  ${DIM}💾 Saved to history (${test_count} tests total)${RESET}"
-        fi
-        
-        # Show random tip
-        local tips=(
-            "For JSON output use --json"
-            "View history with --history"
-            "Select server with --server ID"
-            "Quiet mode with --quiet"
-        )
-        local idx=$((RANDOM % ${#tips[@]}))
-        echo -e "  ${DIM}💡 Tip: ${tips[$idx]}${RESET}"
+        echo -e "  ${DIM}💾 History: $HISTORY_FILE${RESET}"
+        echo -e "  ${DIM}💡 Tip: Use --json for JSON output${RESET}"
         echo ""
     fi
 }
 
-# Run main
-main "$@"
+main
